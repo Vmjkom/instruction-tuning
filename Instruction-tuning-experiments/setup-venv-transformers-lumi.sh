@@ -39,7 +39,6 @@ python -m pip install --upgrade pip setuptools wheel
 # Install pip packages
 #python -m pip install --upgrade torch==1.13.1+rocm5.2 --extra-index-url https://download.pytorch.org/whl/rocm5.2
 python -m pip install --upgrade numpy datasets evaluate accelerate scikit-learn nltk
-# python -m pip install --upgrade /scratch/project_462000319/poyhnent/tietoevry/transformers
 python -m pip install --upgrade /scratch/project_462000319/zosaelai2/transformers
 python -m pip install --upgrade deepspeed==0.10.3
 python -m pip install --upgrade tensorboard

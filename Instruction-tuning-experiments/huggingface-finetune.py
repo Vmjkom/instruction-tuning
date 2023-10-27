@@ -2,20 +2,26 @@ import sys
 import os
 import torch
 import numpy as np
-from instruction_finetuning_datasets import read_data
 from logging import warning
 from datasets import DatasetDict
 from argparse import ArgumentParser
-from peft import get_peft_config, get_peft_model, LoraConfig, TaskType
+from peft import (
+    get_peft_config,
+    get_peft_model,
+    get_peft_model_state_dict,
+    LoraConfig,
+    TaskType
+)
 from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
-    # BloomForCausalLM,
-    # BloomTokenizerFast,
     TrainingArguments,
     Trainer,
-    DataCollatorForLanguageModeling,
+    DataCollatorForLanguageModeling
 )
+
+from instruction_finetuning_datasets import read_data
+
 import logging
 torch.cuda.empty_cache()
 model_max_length = 2048
@@ -23,20 +29,36 @@ model_max_length = 2048
 def argparser():
     ap = ArgumentParser()
     ap.add_argument('--deepspeed_config', type=str, default="./ds-configs/oa_zero3_config_sft.json")
-    # ap.add_argument('--learning_rate', type=float, default=6e-6)
-    # ap.add_argument('--model', type=str)
-    # ap.add_argument('--num_train_epochs', type=int, default=1)
-    # ap.add_argument('--per_device_batch_size', type=int, default=1)
-    # ap.add_argument('--output_dir', type=str, default="output")
-    # ap.add_argument('--gradient_accumulation_steps', type=int, default=1)
-    # ap.add_argument('--output_file', type=str)
-    ap.add_argument('--training_data', type=str, default="dolly")
+    ap.add_argument('--learning_rate', type=float, default=1e-5)
+    ap.add_argument('--model', type=str)
+    ap.add_argument('--tokenizer', type=str)
+    ap.add_argument('--num_train_epochs', type=int, default=1)
+    ap.add_argument('--per_device_batch_size', type=int, default=1)
+    ap.add_argument('--output_dir', type=str, default="output")
+    ap.add_argument('--gradient_accumulation_steps', type=int, default=4)
+    ap.add_argument('--output_file', type=str)
+    ap.add_argument('--training_data', type=str, default="oasst")
+    ap.add_argument('--lang', type=str, default="fi")
     ap.add_argument('--local_rank', type=int)
     ap.add_argument('--use_lora', default=True, type=lambda x: (str(x).lower() == 'true'))
-    ap.add_argument('--transformers_cache',type=str, default="../../transformers_cache")
+    ap.add_argument('--transformers_cache',type=str, default="/scratch/project_2007628/transformers_cache")
     ap.add_argument('--dropout',type=float, default=0.1)
     ap.add_argument('--prompt_structure', default=False, type=lambda x: (str(x).lower() == 'true'))
     return ap
+
+def load_model(model_name, transformers_cache):
+    print("load_model")
+    model = AutoModelForCausalLM.from_pretrained(
+        model_name,
+        cache_dir=transformers_cache,
+        num_labels=1,
+        torch_dtype=torch.bfloat16
+    )
+    return model
+
+def logits_argmax(logits):
+    # https://github.com/huggingface/transformers/issues/15466
+    return logits.argmax(axis=-1)
 
 class PromptMaskingDataCollator(DataCollatorForLanguageModeling):    # Sampo's script
     def __call__(self, features, return_tensors=None):
@@ -105,21 +127,24 @@ def preprocess(data, tokenizer, prompt_structure):   # Sampo's script -- modifie
 def main(argv):
     args = argparser().parse_args(argv[1:])
     log_dir = './logs/'
+    base_model_name = os.path.basename(args.model)
+    output_dir = os.path.join("../models/checkpoints/", base_model_name + "-" + args.training_data + "-" + args.lang)
+    print("Saving checkpoints to", output_dir)
 
     # This needs to be defined before model loading for deepspeed stage 3 to work correctly
     training_args = TrainingArguments(
         deepspeed=args.deepspeed_config,
-        output_dir="../sft_tuning",
+        output_dir=output_dir,
         evaluation_strategy="steps",
         eval_steps=100,
         learning_rate=1e-5,
-        per_device_train_batch_size=2, # trying to prevent GPU OOM
-        gradient_accumulation_steps=8, # trying to prevent GPU OOM
-        per_device_eval_batch_size=2, # trying to prevent GPU OOM
+        per_device_train_batch_size=1,
+        gradient_accumulation_steps=4,
+        per_device_eval_batch_size=1,
         log_on_each_node=False,
         logging_strategy="steps",
-        logging_steps=1,
-        num_train_epochs=2,
+        logging_steps=10,
+        num_train_epochs=1,
         save_strategy="steps",
         save_steps=100,
         save_total_limit=1,
@@ -138,23 +163,16 @@ def main(argv):
 
     # print(training_args)
 
-
     # TOKENIZER
     print("===== Loading tokenizer =====")
-    # tokenizer_path = "TurkuNLP/gpt3-finnish-xl"
-    tokenizer_path = "/scratch/project_2007628/tokenizers/tokenizer_v6_fixed_fin"
-    print("tokenizer_path:", tokenizer_path)
-    tokenizer = AutoTokenizer.from_pretrained(tokenizer_path)
+    print("tokenizer :", args.tokenizer)
+    tokenizer = AutoTokenizer.from_pretrained(args.tokenizer)
     print("===== Loaded tokenizer =====")
 
     # MODEL
     print("===== Loading model =====")
-    # model_path = "TurkuNLP/gpt3-finnish-xl"
-    model_path = "../../33B_torch_step67824_bfloat16"
-    print("model_path:", model_path)
-    model = AutoModelForCausalLM.from_pretrained(
-        model_path, cache_dir=args.transformers_cache, num_labels=1, torch_dtype=torch.bfloat16
-    )
+    print("base model:", args.model)
+    model = load_model(args.model, args.transformers_cache)
     print("===== Loaded model =====")
 
     if args.use_lora:
@@ -171,9 +189,9 @@ def main(argv):
         tokenizer.add_special_tokens({'sep_token': '<|endofprompt|>'})
     model.resize_token_embeddings(len(tokenizer))
     
-    train_data = read_data(args.training_data, split="train")
-    val_data = read_data(args.training_data, split="valid")
-    eval_data = read_data(args.training_data, split="eval")
+    train_data = read_data(args.training_data, split="train", lang=args.lang)
+    val_data = read_data(args.training_data, split="valid", lang=args.lang)
+    eval_data = read_data(args.training_data, split="eval", lang=args.lang)
 
     print("Size of training data", len(train_data))
     print("Size of validation data", len(val_data))
@@ -192,7 +210,6 @@ def main(argv):
 
     print("Filtering by length")
     dataset = filter_by_length(dataset, model_max_length)
-
     data_collator = PromptMaskingDataCollator(
             tokenizer=tokenizer,
             mlm=False
@@ -207,15 +224,25 @@ def main(argv):
         eval_dataset=dataset['validation'],
         data_collator=data_collator,
         tokenizer=tokenizer,
+        preprocess_logits_for_metrics=logits_argmax,
     )
 
-    trainer.train()
-    
-    if args.use_lora:
-        trainer.model.save_pretrained("../sft_tuning/poro_sft_lora")
-    else:
-        trainer.save_model(os.path.join("../sft_tuning/poro_sft_lora"))
+    # print PeftModel param dimensions
+    for name, param in trainer.model.named_parameters():
+        if "lora" in name:
+            print(name, "---", param.shape)
 
+    trainer.train()
+    base_model_name = os.path.basename(args.model)
+    save_directory = os.path.join("../models/finetuned/", base_model_name + "-" + args.training_data + "-" + args.lang)
+    if args.use_lora:
+        trainer.model.save_pretrained(save_directory + "-lora")
+        # print PeftModel param dimensions
+        for name, param in trainer.model.named_parameters():
+            if "lora" in name:
+                print(name, "---", param.shape)
+    else:
+        trainer.save_model(save_directory)
     eval_results = trainer.evaluate(dataset['evaluation'])
 
     print('Training data', args.training_data)

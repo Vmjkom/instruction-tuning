@@ -3,43 +3,41 @@ from pathlib import Path
 import json
 
 
-def read_oasst(path):
+def read_oasst(path, lang='fi'):
+  if lang == 'fi':
+    text_col = "text"
+  else:
+    text_col = "orig_text"
   path=Path(path)
   with open(path, 'rb') as f:
     oasst_dict=list(f)
-
   questions_dict = {}
   context_wq_dict = {}
   context_return = []
   answers_return = []
   questions_return = []
-
   for json_str in oasst_dict:
     result = json.loads(json_str)
     if result["role"] == "prompter":
-      questions_dict[result["message_id"]] = result["text"]
+      questions_dict[result["message_id"]] = result[text_col]
       context_wq_dict[result["message_id"]] = " "
-      
       if result["parent_id"]: 
         try:
           context_wq_dict[result["message_id"]] = context_wq_dict[result["parent_id"]]
         except:
           context_wq_dict[result["message_id"]] = " "
-
     elif result["role"] == "assistant":
       try:
         questions_return.append(questions_dict[result["parent_id"]])
       except:
         continue
-      answers_return.append(result["orig_text"])
-      
+      answers_return.append(result[text_col])
       if context_wq_dict[result["parent_id"]]:
         context_return.append(context_wq_dict[result["parent_id"]])
-        context_wq_dict[result["message_id"]] = context_wq_dict[result["parent_id"]] + questions_dict[result["parent_id"]] + result["orig_text"]
+        context_wq_dict[result["message_id"]] = context_wq_dict[result["parent_id"]] + questions_dict[result["parent_id"]] + result[text_col]
       else:
-        context_wq_dict[result["message_id"]] = questions_dict[result["parent_id"]] + "\n\n" + result["orig_text"] 
-      context_wq_dict[result["message_id"]] = context_wq_dict[result["parent_id"]] + "\n\n" + questions_dict[result["parent_id"]] + "\n\n" + result["orig_text"]
-
+        context_wq_dict[result["message_id"]] = questions_dict[result["parent_id"]] + "\n\n" + result[text_col]
+      context_wq_dict[result["message_id"]] = context_wq_dict[result["parent_id"]] + "\n\n" + questions_dict[result["parent_id"]] + "\n\n" + result[text_col]
   return questions_return, context_return, answers_return
 
 def read_dolly(path):
@@ -62,7 +60,7 @@ def read_dolly(path):
     answers.append(result["response"])
   return questions, context, answers
 
-def read_data(data="dolly", split="train"):
+def read_data(data="dolly", split="train", lang="fi"):
   questions = []
   answers = []
   context = []
@@ -82,6 +80,13 @@ def read_data(data="dolly", split="train"):
       answers = answers + instruct_answers
       print("Size of instruct_qa training data", len(instruct_questions))
 
+    if "oasst" in data:
+      oasst_questions, oasst_context, oasst_answers = read_oasst("data/oasst-fi/oasst1-fi-train.jsonl", lang=lang)
+      questions = questions + oasst_questions
+      context = context + oasst_context
+      answers = answers + oasst_answers
+      print("Size of oasst training data", len(questions))
+
   elif "valid" in split:
     if "dolly" in data:
       dolly_questions, dolly_context, dolly_answers = read_dolly("data/dolly-fi/dolly-fi-valid.jsonl")
@@ -95,6 +100,12 @@ def read_data(data="dolly", split="train"):
       context = context + instruct_context
       answers = answers + instruct_answers
 
+    if "oasst" in data:
+      oasst_questions, oasst_context, oasst_answers = read_oasst("data/oasst-fi/oasst1-fi-valid.jsonl", lang=lang)
+      questions = questions + oasst_questions
+      context = context + oasst_context
+      answers = answers + oasst_answers
+
   elif "eval" in split:
     if "dolly" in data:
       dolly_questions, dolly_context, dolly_answers = read_dolly("data/dolly-fi/dolly-fi-eval.jsonl")
@@ -107,6 +118,12 @@ def read_data(data="dolly", split="train"):
       questions = questions + instruct_questions
       context = context + instruct_context
       answers = answers + instruct_answers
+
+    if "oasst" in data:
+      oasst_questions, oasst_context, oasst_answers = read_oasst("data/oasst-fi/oasst1-fi-eval.jsonl", lang=lang)
+      questions = questions + oasst_questions
+      context = context + oasst_context
+      answers = answers + oasst_answers
 
   data = {
     'prompt': questions,

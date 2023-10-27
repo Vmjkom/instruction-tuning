@@ -1,11 +1,12 @@
 #!/bin/bash
 #SBATCH --job-name=poro_sft  # Job name
 #SBATCH --account=project_2007628  # Project for billing
-#SBATCH --time=04:00:00       # Run time (d-hh:mm:ss)
+#SBATCH --time=01:00:00       # Run time (d-hh:mm:ss)
 #SBATCH --partition=gpusmall
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=32
-#SBATCH --gres=gpu:a100:2,nvme:950
+#SBATCH --gres=gpu:a100:2
+#SBATCH --mem=128G
 #SBATCH --output=logs/%j.out # Name of stdout output file
 #SBATCH --error=logs/%j.err  # Name of stderr error file
 

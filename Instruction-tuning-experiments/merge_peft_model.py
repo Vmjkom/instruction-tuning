@@ -19,6 +19,7 @@ def main(argv):
     args = argparser().parse_args(argv[1:])
 
     # Load PeFT LoRA model
+    print("LoRA adatper:", args.lora_adapter)
     config = PeftConfig.from_pretrained(args.lora_adapter)
     print("Base model:", config.base_model_name_or_path)
     base_model = AutoModelForCausalLM.from_pretrained(config.base_model_name_or_path,

@@ -1,6 +1,6 @@
 {
   "fp16": {
-    "enabled": "auto",
+    "enabled": false,
     "loss_scale": 0,
     "loss_scale_window": 1000,
     "initial_scale_power": 16,
@@ -8,7 +8,17 @@
     "min_loss_scale": 1
   },
   "bf16": {
-    "enabled": "auto"
+    "enabled": true
+  },
+  "scheduler": {
+    "type": "WarmupDecayLR",
+    "params": {
+      "warmup_min_lr": "auto",
+      "warmup_max_lr": "auto",
+      "warmup_num_steps": "auto",
+      "warmup_type": "linear",
+      "total_num_steps": "auto"
+    }
   },
   "zero_optimization": {
     "stage": 3,

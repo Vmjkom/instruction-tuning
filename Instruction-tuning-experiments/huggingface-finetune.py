@@ -55,27 +55,17 @@ def argparser():
 
 def load_model(model_name, transformers_cache, use_lora=False, ignore_bias_buffers=False, task="sft"):
     print("load_model")
-    if task == "dpo":
-        model = AutoModelForCausalLM.from_pretrained(
-            model_name,
-            cache_dir=transformers_cache,
-            num_labels=1,
-            #torch_dtype=torch.bfloat16
-        )
-    else:
-        model = AutoModelForCausalLM.from_pretrained(
-            model_name,
-            cache_dir=transformers_cache,
-            num_labels=1,
-            torch_dtype=torch.bfloat16
-        )
-
+    model = AutoModelForCausalLM.from_pretrained(
+        model_name,
+        cache_dir=transformers_cache,
+        num_labels=1,
+        torch_dtype=torch.bfloat16
+    )
     if ignore_bias_buffers:
         # torch distributed hack
         model._ddp_params_and_buffers_to_ignore = [
             name for name, buffer in model.named_buffers() if buffer.dtype == torch.bool
         ]
-
     if use_lora is True:
         print("Using lora")
         peft_config = LoraConfig(task_type=TaskType.CAUSAL_LM, inference_mode=False, r=8, lora_alpha=32,
@@ -323,6 +313,7 @@ def train_sft(args):
     print('batch size:', args.per_device_batch_size)
     print('Gradient accumulation steps:', args.gradient_accumulation_steps)
     print('Evaluation results:', eval_results['eval_loss'])
+    print('Save directory:', save_directory)
 
 
 def train_dpo(args):
@@ -336,29 +327,25 @@ def train_dpo(args):
     # 4. initialize training arguments:
     training_args = TrainingArguments(
         deepspeed="./ds-configs/oa_deepspeed_rl_zero3.json",
+        remove_unused_columns=False,
         output_dir=output_dir,
+        logging_dir=log_dir,
         evaluation_strategy="steps",
-        eval_steps=100,
-        learning_rate=1e-3,
-        per_device_train_batch_size=4,
-        gradient_accumulation_steps=1,
+        eval_steps=50,
+        num_train_epochs=1,
+        save_strategy="epoch",
+        save_total_limit=1,
+        per_device_train_batch_size=1,
+        gradient_accumulation_steps=4,
         log_on_each_node=False,
         logging_strategy="steps",
         logging_steps=10,
-        max_steps=1000,
-        save_strategy="steps",
-        save_steps=100,
-        save_total_limit=1,
-        disable_tqdm=False,
-        logging_dir=log_dir,
-        optim='rmsprop',
-        warmup_steps=150,
-        gradient_checkpointing=True,
+        logging_first_step=True,
         report_to='tensorboard',
-        # fp16=True,
+        learning_rate=5e-6,
+        optim="rmsprop",
+        warmup_steps=150,
         bf16=True,
-        # half_precision_backend="cuda_amp",
-        local_rank=args.local_rank,
     )
 
     # TOKENIZER
@@ -373,7 +360,7 @@ def train_dpo(args):
 
     print("=== Loading model_ref ===")
     model_ref = load_model(args.model, args.transformers_cache, args.use_lora, task=args.task)
-    # Error msg: DeepSpeed ZeRO-3 is enabled and is not compatible with `create_reference_model()
+    # create_reference_model error: DeepSpeed ZeRO-3 is enabled and is not compatible with `create_reference_model()
     # model_ref = create_reference_model(model, num_shared_layers=6)
 
     # add special tokens if necessary
@@ -410,17 +397,17 @@ def train_dpo(args):
 
     # 5. initialize the DPO trainer
     dpo_trainer = DPOTrainer(
-        model,
-        model_ref,
+        model=model,
+        ref_model=model_ref,
         args=training_args,
         beta=0.2,
         train_dataset=dataset['train'],
         eval_dataset=dataset['validation'],
         tokenizer=tokenizer,
-        max_length=512,
+        max_length=model_max_length,
         max_target_length=128,
         max_prompt_length=128,
-        generate_during_eval=True,
+        # generate_during_eval=True,
     )
 
     # 6. train
@@ -444,6 +431,7 @@ def train_dpo(args):
     print('batch size:', args.per_device_batch_size)
     print('Gradient accumulation steps:', args.gradient_accumulation_steps)
     print('Evaluation results:', eval_results['eval_loss'])
+    print('Save directory:', save_directory)
 
 
 def main(argv):

@@ -35,6 +35,8 @@ torch.cuda.empty_cache()
 model_max_length = 2048
 user_token = "<|user|>"
 assistant_token = "<|assistant|>"
+chatml_start_token = "<|im_start|>"
+chatml_end_token = "<|im_end|>"
 
 def argparser():
     ap = ArgumentParser()
@@ -52,6 +54,7 @@ def argparser():
     ap.add_argument('--lang', type=str, default="fi")
     ap.add_argument('--local_rank', type=int)
     ap.add_argument('--use_lora', default=True, type=lambda x: (str(x).lower() == 'true'))
+    ap.add_argument('--use_chatml_format', default=True, type=lambda x: (str(x).lower() == 'true'))
     ap.add_argument('--transformers_cache',type=str, default="/scratch/project_2007628/transformers_cache")
     ap.add_argument('--dropout',type=float, default=0.1)
     ap.add_argument('--prompt_structure', default=False, type=lambda x: (str(x).lower() == 'true'))
@@ -90,6 +93,8 @@ class PromptMaskingDataCollator(DataCollatorForLanguageModeling):    # Sampo's s
         # if tokenizer has assistant_token, use it to signal prompt boundary, else use <|endofprompt|>
         if assistant_token in self.tokenizer.additional_special_tokens:
             assistant_id = self.tokenizer(assistant_token)['input_ids'][0]
+        elif chatml_start_token in self.tokenizer.additional_special_tokens:
+            assistant_id = self.tokenizer(chatml_start_token)['input_ids'][0]
         else:
             assistant_id = -100
         # print("assistant_id:", assistant_id)
@@ -134,7 +139,7 @@ def preprocess_sft(data, tokenizer):   # Sampo's script -- modified with prompt 
         else:
             input_i = context + '\n' + prompt
         # FinGPT needs end_of_prompt to signal prompt boundary, Poro uses assistant_token
-        if assistant_token in tokenizer.additional_special_tokens:
+        if (assistant_token in tokenizer.additional_special_tokens) or (chatml_start_token in tokenizer.additional_special_tokens):
             combined_line = input_i + '\n' + response
         else:
             combined_line = input_i + end_of_prompt + '\n' + response

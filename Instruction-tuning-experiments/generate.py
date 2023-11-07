@@ -3,6 +3,7 @@ import os.path
 import sys
 import json
 import torch
+import numpy as np
 
 from argparse import ArgumentParser
 from logging import warning
@@ -132,14 +133,20 @@ def load_prompts(filepath, max_prompts=10, lang="en"):
                     prompt = "<|user|> " + line[prompt_col]
                 else:
                     prompt = line[context_col] + "\n<|user|> " + line[prompt_col]
-                prompts.append(prompt)
+                prompts.append(prompt.rstrip())
                 responses.append(line[response_col])
     return prompts, responses
 
 def compute_bertscore(references, predictions):
     bertscore = load("bertscore")
     results = bertscore.compute(predictions=predictions, references=references, lang="en")
-    print("BERTScore:", results)
+    precision = np.mean(np.array(results['precision']))
+    recall = np.mean(np.array(results['recall']))
+    f1 = np.mean(np.array(results['f1']))
+    print("F1:", f1)
+    print("Precision:", precision)
+    print("Recall:", recall)
+    return results
 
 def main(argv):
     args = argparser().parse_args(argv[1:])
@@ -162,7 +169,7 @@ def main(argv):
         generated = generate(prompts, tokenizer, model, args)
         print("prompts:", len(prompts))
         print("generated:", len(generated))
-        compute_bertscore(references=prompts, predictions=generated)
+        results = compute_bertscore(references=prompts, predictions=generated)
 
     if args.memory_usage:
         report_memory_usage('after generation')

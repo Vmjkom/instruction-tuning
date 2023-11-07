@@ -22,10 +22,10 @@ from transformers import (
 )
 
 
-from trl import (
-    DPOTrainer,
-    create_reference_model
-)
+# from trl import (
+#     DPOTrainer,
+#     create_reference_model
+# )
 
 # custom classes
 from instruction_finetuning_datasets import read_data_sft, read_data_dpo
@@ -127,6 +127,7 @@ def preprocess_sft(data, tokenizer):   # Sampo's script -- modified with prompt 
     contexts = data['context']
     responses = data['response']
     end_of_prompt = tokenizer.pad_token # tokenizer.sep_token
+    end_of_text = tokenizer.eos_token
     combined = []
     for prompt, context, response in zip(prompts, contexts, responses):
         if not context or context.isspace():
@@ -135,9 +136,9 @@ def preprocess_sft(data, tokenizer):   # Sampo's script -- modified with prompt 
             input_i = context + '\n' + prompt
         # FinGPT needs end_of_prompt to signal prompt boundary, Poro uses assistant_token
         if assistant_token in tokenizer.additional_special_tokens:
-            combined_line = input_i + '\n' + response
+            combined_line = input_i + '\n' + response + end_of_text
         else:
-            combined_line = input_i + end_of_prompt + '\n' + response
+            combined_line = input_i + end_of_prompt + '\n' + response + end_of_text
         # print("combined_line:", combined_line)
         combined.append(combined_line)
     # Truncation would be problematic for this task

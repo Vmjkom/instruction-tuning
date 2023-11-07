@@ -18,7 +18,7 @@ from trl import (
 
 # custom classes
 from utils import load_model, logits_argmax
-from instruction_finetuning_datasets import read_data
+from instruction_finetuning_datasets import read_data_sft
 
 model_max_length = 2048
 user_token = "<|user|>"
@@ -128,36 +128,9 @@ def train_sft(args):
     #     tokenizer.add_special_tokens({'sep_token': '<|endofprompt|>'})
     # model.resize_token_embeddings(len(tokenizer))
 
-    if args.lang == "both":
-        print("Combine fi and en datasets")
-        train_data1 = read_data(args.training_data, split="train", lang="fi", task=args.task)
-        train_data2 = read_data(args.training_data, split="train", lang="en", task=args.task)
-
-        val_data1 = read_data(args.training_data, split="valid", lang="fi", task=args.task)
-        val_data2 = read_data(args.training_data, split="valid", lang="en", task=args.task)
-
-        eval_data1 = read_data(args.training_data, split="eval", lang="fi", task=args.task)
-        eval_data2 = read_data(args.training_data, split="eval", lang="en", task=args.task)
-
-        train_data = {'prompt': train_data1['prompt'] + train_data2['prompt'],
-                      'context': train_data1['context'] + train_data2['context'],
-                      'response': train_data1['response'] + train_data2['response']}
-        train_data = Dataset.from_dict(train_data)
-
-        val_data = {'prompt': val_data1['prompt'] + val_data2['prompt'],
-                    'context': val_data1['context'] + val_data2['context'],
-                    'response': val_data1['response'] + val_data2['response']}
-        val_data = Dataset.from_dict(val_data)
-
-        eval_data = {'prompt': eval_data1['prompt'] + eval_data2['prompt'],
-                     'context': eval_data1['context'] + eval_data2['context'],
-                     'response': eval_data1['response'] + eval_data2['response']}
-        eval_data = Dataset.from_dict(eval_data)
-
-    else:
-        train_data = read_data(args.training_data, split="train", lang=args.lang, task=args.task)
-        val_data = read_data(args.training_data, split="valid", lang=args.lang, task=args.task)
-        eval_data = read_data(args.training_data, split="eval", lang=args.lang, task=args.task)
+    train_data = read_data_sft(args.training_data, split="train", lang=args.lang)
+    val_data = read_data_sft(args.training_data, split="valid", lang=args.lang)
+    eval_data = read_data_sft(args.training_data, split="eval", lang=args.lang)
 
     print("Size of training data", len(train_data))
     print("Size of validation data", len(val_data))

@@ -42,6 +42,7 @@ def load_model(model_name, transformers_cache, use_lora=False, ignore_bias_buffe
         ]
     if use_lora is True:
         print("Using lora")
+        model.enable_input_require_grads()
         peft_config = LoraConfig(task_type=TaskType.CAUSAL_LM, inference_mode=False, r=8, lora_alpha=32,
                                      lora_dropout=0.1)
         model = get_peft_model(model, peft_config)

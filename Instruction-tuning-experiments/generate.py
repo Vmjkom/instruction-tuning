@@ -8,7 +8,7 @@ from argparse import ArgumentParser
 from logging import warning
 
 from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
-
+from evaluate import load
 from utils import timed
 
 
@@ -27,7 +27,7 @@ def argparser():
     ap.add_argument('--lang', default="en", type=str)
     ap.add_argument('--max_prompts', default=10, type=int)
     ap.add_argument('--min_new_tokens', default=10, type=int)
-    ap.add_argument('--max_new_tokens', default=100, type=int)
+    ap.add_argument('--max_new_tokens', default=200, type=int)
     ap.add_argument('--temperature', default=1.0, type=float)
     ap.add_argument('--num_return_sequences', default=1, type=int)
     ap.add_argument('--memory-usage', action='store_true')
@@ -35,6 +35,7 @@ def argparser():
     ap.add_argument('--dtype', choices=DTYPE_MAP.keys(), default='bf16')
     ap.add_argument('--device-map', choices=DMAP_CHOICES, default='auto')
     ap.add_argument('--trust-remote-code', default=None, action='store_true')
+    ap.add_argument('--transformers_cache',type=str, default="/scratch/project_2007628/transformers_cache")
     ap.add_argument('model')
     ap.add_argument('file', nargs='?')
     return ap
@@ -52,6 +53,7 @@ def report_memory_usage(message, out=sys.stderr):
 
 @timed
 def generate(prompts, tokenizer, model, args):
+    generated_responses = []
     pipe = pipeline(
         'text-generation',
         model=model,
@@ -65,15 +67,17 @@ def generate(prompts, tokenizer, model, args):
         num_return_sequences=args.num_return_sequences,
         # repetition_penalty=1.2,
     )
-
     for prompt in prompts:
         prompt = prompt.rstrip('\n')
         generated = pipe(prompt)
         for g in generated:
             text = g['generated_text']
-            text = text.replace(prompt, f'*****{prompt}\n*****\n', 1)
+            print("-"*10, "Prompt:", prompt, "-"*10)
+            text = text.replace(prompt, '', 1)
             print(text)
             print('-'*78)
+            generated_responses.append(text)
+    return generated_responses
 
 
 @timed
@@ -83,6 +87,7 @@ def load_model(args):
         device_map=args.device_map,
         torch_dtype=DTYPE_MAP[args.dtype],
         trust_remote_code=args.trust_remote_code,
+        cache_dir=args.transformers_cache
     )
     return model
 
@@ -100,6 +105,8 @@ def check_devices(model, args):
 
 def load_prompts(filepath, max_prompts=10, lang="en"):
     prompts = []
+    responses = []
+    print("filepath:", filepath)
     if os.path.splitext(filepath)[-1] == ".txt":
         prompts = open(filepath)
     elif os.path.splitext(filepath)[-1] == ".jsonl":
@@ -115,16 +122,24 @@ def load_prompts(filepath, max_prompts=10, lang="en"):
         if "dolly" in filepath:
             prompt_col = "instruction"
             context_col = "context"
+            response_col = "response"
             if lang == "en":
                 prompt_col = "orig_instruction"
                 context_col = "orig_context"
+                response_col = "orig_response"
             for line in test_data:
                 if not line[context_col] or line[context_col].isspace():
                     prompt = "<|user|> " + line[prompt_col]
                 else:
                     prompt = line[context_col] + "\n<|user|> " + line[prompt_col]
                 prompts.append(prompt)
-    return prompts
+                responses.append(line[response_col])
+    return prompts, responses
+
+def compute_bertscore(references, predictions):
+    bertscore = load("bertscore")
+    results = bertscore.compute(predictions=predictions, references=references, lang="en")
+    print("BERTScore:", results)
 
 def main(argv):
     args = argparser().parse_args(argv[1:])
@@ -143,8 +158,11 @@ def main(argv):
     if not args.file:
         generate(sys.stdin, tokenizer, model, args)
     else:
-        prompts = load_prompts(args.file, args.max_prompts, args.lang)
-        generate(prompts, tokenizer, model, args)
+        prompts, responses = load_prompts(args.file, args.max_prompts, args.lang)
+        generated = generate(prompts, tokenizer, model, args)
+        print("prompts:", len(prompts))
+        print("generated:", len(generated))
+        compute_bertscore(references=prompts, predictions=generated)
 
     if args.memory_usage:
         report_memory_usage('after generation')

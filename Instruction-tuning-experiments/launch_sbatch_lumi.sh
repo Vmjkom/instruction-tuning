@@ -19,13 +19,12 @@ export FI_CXI_DEFAULT_CQ_SIZE=262144    # default 131072
 
 export NCCL_SOCKET_IFNAME=hsn
 
-# export TRANSFORMERS_CACHE=/scratch/project_462000319/.cache
-export TRANSFORMERS_CACHE=/scratch/project_462000319/zosaelai2/.cache
+export TRANSFORMERS_CACHE=/scratch/project_462000319/.cache
 export TOKENIZERS_PARALLELISM=false
 export PYTHONPATH="/scratch/project_462000319/zosaelai2"
 
 module load cray-python
-module load LUMI/22.08 partition/G rocm5.4.2
+module load LUMI/22.08 partition/G rocm/5.2.3
 
 module use /appl/local/csc/modulefiles/
 module load pytorch

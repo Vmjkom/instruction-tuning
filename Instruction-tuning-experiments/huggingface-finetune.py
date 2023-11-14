@@ -3,7 +3,7 @@ import os
 import torch
 import numpy as np
 from logging import warning
-from datasets import DatasetDict, Dataset
+from datasets import DatasetDict
 from argparse import ArgumentParser
 from peft import (
     get_peft_config,
@@ -54,8 +54,8 @@ def argparser():
     ap.add_argument('--lang', type=str, default="fi")
     ap.add_argument('--local_rank', type=int)
     ap.add_argument('--use_lora', default=True, type=lambda x: (str(x).lower() == 'true'))
-    ap.add_argument('--use_chatml_format', default=True, type=lambda x: (str(x).lower() == 'true'))
-    ap.add_argument('--transformers_cache',type=str, default="/scratch/project_2007628/transformers_cache")
+    ap.add_argument('--chatml_format', default=False, type=lambda x: (str(x).lower() == 'true'))
+    ap.add_argument('--transformers_cache',type=str, default="/scratch/project_462000319/transformers_cache")
     ap.add_argument('--dropout',type=float, default=0.1)
     ap.add_argument('--prompt_structure', default=False, type=lambda x: (str(x).lower() == 'true'))
     return ap
@@ -68,6 +68,7 @@ def load_model(model_name, transformers_cache, use_lora=False, ignore_bias_buffe
         num_labels=1,
         torch_dtype=torch.bfloat16
     )
+    # print(model)
     if ignore_bias_buffers:
         # torch distributed hack
         model._ddp_params_and_buffers_to_ignore = [
@@ -77,7 +78,8 @@ def load_model(model_name, transformers_cache, use_lora=False, ignore_bias_buffe
         print("Using lora")
         model.enable_input_require_grads()
         peft_config = LoraConfig(task_type=TaskType.CAUSAL_LM, inference_mode=False, r=8, lora_alpha=32,
-                                     lora_dropout=0.1)  # Parameter values from Sampo's script
+                                     lora_dropout=0.1,
+                                     target_modules=['query_key_value'])  # Parameter values from Sampo's script
         model = get_peft_model(model, peft_config)
         model.print_trainable_parameters()
         print("Loaded lora model")
@@ -97,20 +99,20 @@ class PromptMaskingDataCollator(DataCollatorForLanguageModeling):    # Sampo's s
             assistant_id = self.tokenizer(chatml_start_token)['input_ids'][0]
         else:
             assistant_id = -100
-        # print("assistant_id:", assistant_id)
+        print("assistant_id:", assistant_id)
         for i in range(len(data['labels'])):
             assistant_indices = np.where(data['labels'][i] == assistant_id)[0]
-            # print("labels:", data['labels'][i])
-            # print("decoded:", self.tokenizer.decode(data['input_ids'][i]))
-            # print("assistant_indices:", assistant_indices)
-            # print("last assistant index:", assistant_indices[-1])
+            print("labels:", data['labels'][i])
+            print("decoded:", self.tokenizer.decode(data['input_ids'][i]))
+            print("assistant_indices:", assistant_indices)
+            print("last assistant index:", assistant_indices[-1])
             if len(assistant_indices) > 0:
                 data['labels'][i, :assistant_indices[-1]] = -100
             else:
                 warning('missing assistant_token in labels')
-            # print("labels:", data['labels'][i])
-            # print("decoded labels:", self.tokenizer.decode(data['labels'][i][assistant_indices[-1]:]))
-            # print("-"*100)
+            print("labels:", data['labels'][i])
+            print("decoded labels:", self.tokenizer.decode(data['labels'][i][assistant_indices[-1]:]))
+            print("-"*100)
         return data
 
 def filter_by_length(datasetdict, max_length):
@@ -170,7 +172,17 @@ def preprocess_dpo(data):   # Sampo's script -- modified with prompt structure
 def train_sft(args):
     log_dir = './logs/'
     base_model_name = os.path.basename(args.model)
-    output_dir = os.path.join("/scratch/project_2007628/zosaelai2/models/sft_checkpoints/", base_model_name + "-" + args.training_data + "-" + args.lang)
+    if args.chatml_format:
+        output_dir = os.path.join("../../models/sft_checkpoints/", base_model_name + 
+                                "-chatml" +
+                                "-" + args.training_data + 
+                                "-" + args.lang +
+                                "-" + str(args.num_train_epochs) + "epochs")
+    else:
+        output_dir = os.path.join("../../models/sft_checkpoints/", base_model_name + 
+                                  "-" + args.training_data + 
+                                  "-" + args.lang +
+                                  "-" + str(args.num_train_epochs) + "epochs")
     print("Saving checkpoints to", output_dir)
 
     # This needs to be defined before model loading for deepspeed stage 3 to work correctly
@@ -198,8 +210,8 @@ def train_sft(args):
         max_grad_norm=1.0,
         gradient_checkpointing=True,
         report_to='tensorboard',
-        #bf16=True,
-        #tf32=True,
+        bf16=True,
+        warmup_steps=300,
         half_precision_backend="cuda_amp",
         local_rank=args.local_rank,
     )
@@ -230,9 +242,10 @@ def train_sft(args):
     # resize_token_embeddings(model, len(tokenizer))
 
     print("Loading data for SFT")
-    train_data = read_data_sft(args.training_data, split="train", lang=args.lang)
-    val_data = read_data_sft(args.training_data, split="valid", lang=args.lang)
-    eval_data = read_data_sft(args.training_data, split="eval", lang=args.lang)
+    print("args.chatml_format:", args.chatml_format)
+    train_data = read_data_sft(args.training_data, split="train", lang=args.lang, chatml_format=args.chatml_format)
+    val_data = read_data_sft(args.training_data, split="valid", lang=args.lang, chatml_format=args.chatml_format)
+    eval_data = read_data_sft(args.training_data, split="eval", lang=args.lang, chatml_format=args.chatml_format)
 
     print("Size of training data", len(train_data))
     print("Size of validation data", len(val_data))
@@ -270,7 +283,7 @@ def train_sft(args):
 
     trainer.train()
     base_model_name = os.path.basename(args.model)
-    save_directory = os.path.join("/scratch/project_2007628/zosaelai2/models/sft_finetuned/", base_model_name + "-" + args.training_data + "-" + args.lang)
+    save_directory = os.path.join("../../models/sft_finetuned/", base_model_name + "-" + args.training_data + "-" + args.lang)
     if args.use_lora:
         trainer.model.save_pretrained(save_directory + "-lora")
     else:
@@ -290,7 +303,7 @@ def train_dpo(args):
     # https://github.com/huggingface/trl/blob/main/examples/scripts/dpo.py
     log_dir = './logs/'
     base_model_name = os.path.basename(args.model)
-    output_dir = os.path.join("/scratch/project_2007628/zosaelai2/models/dpo_checkpoints/", base_model_name + "-" + args.training_data + "-" + args.lang)
+    output_dir = os.path.join("../../models/dpo_checkpoints/", base_model_name + "-" + args.training_data + "-" + args.lang)
     print("Saving checkpoints to", output_dir)
 
     # This needs to be defined before model loading for deepspeed stage 3 to work correctly
@@ -312,7 +325,7 @@ def train_dpo(args):
         logging_steps=10,
         logging_first_step=True,
         report_to='tensorboard',
-        learning_rate=5e-7,
+        learning_rate=args.learning_rate,
         optim="rmsprop",
         warmup_steps=100,
         bf16=True,
@@ -387,7 +400,7 @@ def train_dpo(args):
     dpo_trainer.train()
 
     base_model_name = os.path.basename(args.model)
-    save_directory = os.path.join("/scratch/project_2007628/zosaelai2/models/dpo_finetuned/", base_model_name + "-" + args.training_data + "-" + args.lang)
+    save_directory = os.path.join("../../models/dpo_finetuned/", base_model_name + "-" + args.training_data + "-" + args.lang)
     if args.use_lora:
         dpo_trainer.model.save_pretrained(save_directory + "-lora")
         # print PeftModel param dimensions

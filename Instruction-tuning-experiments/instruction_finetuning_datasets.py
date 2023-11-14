@@ -3,11 +3,14 @@ from pathlib import Path
 import json
 import numpy as np
 
+user_token = "<|user|>"
+assistant_token = "<|assistant|>"
+chatml_start_token = "<|im_start|>"
+chatml_end_token = "<|im_end|>"
+
 # Preprocessing datasets for SFT
-def read_oasst_sft(path, lang='fi'):
+def read_oasst_sft(path, lang='fi', chatml_format=False):
     # end_of_text = tokenizer.eos_token
-    user_token = "<|user|>"
-    assistant_token = "<|assistant|>"
     if lang == 'fi':
         text_col = "text"
     else:
@@ -24,7 +27,10 @@ def read_oasst_sft(path, lang='fi'):
         # print("-"*20, "Index", index, "-"*20)
         result = json.loads(json_str)
         if result["role"] == "prompter":
-            question_combined = user_token + " " + result[text_col]
+            if chatml_format:
+                question_combined = chatml_start_token + "user\n" + result[text_col] + chatml_end_token
+            else:
+                question_combined = user_token + result[text_col]
             questions_dict[result["message_id"]] = question_combined
             context_wq_dict[result["message_id"]] = " "
             if result["parent_id"]:
@@ -38,7 +44,10 @@ def read_oasst_sft(path, lang='fi'):
                 # print("Question:", questions_dict[result["parent_id"]])
             except:
                 continue
-            answer_combined = assistant_token + " " + result[text_col]
+            if chatml_format:
+                answer_combined = chatml_start_token + "assistant\n" + result[text_col] + chatml_end_token
+            else:
+                answer_combined = assistant_token + result[text_col]
             answers_return.append(answer_combined)
             # print("Answer:", answer_combined)
             # answers_return.append(result[text_col])
@@ -57,7 +66,7 @@ def read_oasst_sft(path, lang='fi'):
     return questions_return, context_return, answers_return
 
 
-def read_dolly_sft(path, lang="fi"):
+def read_dolly_sft(path, lang="fi", chatml_format=False):
     if lang == "fi":
         instruction_col = "instruction"
         context_col = "context"
@@ -66,8 +75,6 @@ def read_dolly_sft(path, lang="fi"):
         instruction_col = "orig_instruction"
         context_col = "orig_context"
         response_col = "orig_response"
-    user_token = "<|user|>"
-    assistant_token = "<|assistant|>"
     path = Path(path)
     with open(path, 'rb') as f:
         dolly_dict = list(f)
@@ -77,14 +84,20 @@ def read_dolly_sft(path, lang="fi"):
     for json_str in dolly_dict:
         result = json.loads(json_str)
         # prompt = result['instruction'] + '\n\n'
-        prompt = user_token + " " + result[instruction_col]
+        if chatml_format:
+            prompt = chatml_start_token + "user\n" + result[instruction_col] + chatml_end_token
+        else:
+            prompt = user_token + result[instruction_col]
         if result[context_col] and not result[context_col].isspace():
             context.append(result[context_col])
         else:
             context.append(' ')
         questions.append(prompt)
         # answers.append(result["response"])
-        answer = assistant_token + " " + result[response_col]
+        if chatml_format:
+            answer = chatml_start_token + "assistant\n" + result[response_col] + chatml_end_token
+        else:
+            answer = assistant_token + result[response_col]
         answers.append(answer)
     return questions, context, answers
 
@@ -256,7 +269,7 @@ def read_data_dpo(data="dolly", split="train", lang="fi"):
     }
     return Dataset.from_dict(data)
 
-def read_data_sft(data="dolly", split="train", lang="fi"):
+def read_data_sft(data="dolly", split="train", lang="fi", chatml_format=False):
     questions = []
     context = []
     answers = []
@@ -267,7 +280,9 @@ def read_data_sft(data="dolly", split="train", lang="fi"):
             else:
                 languages = [lang]
             for la in languages:
-                dolly_questions, dolly_context, dolly_answers = read_dolly_sft("data/dolly-fi/dolly-fi-train.jsonl", lang=la)
+                dolly_questions, dolly_context, dolly_answers = read_dolly_sft("data/dolly-fi/dolly-fi-train.jsonl", 
+                                                                               lang=la,
+                                                                               chatml_format=chatml_format)
                 questions = questions + dolly_questions
                 context = context + dolly_context
                 answers = answers + dolly_answers
@@ -279,9 +294,9 @@ def read_data_sft(data="dolly", split="train", lang="fi"):
             else:
                 languages = [lang]
             for la in languages:
-                instruct_questions, instruct_context, instruct_answers = read_dolly_sft(
-                "data/instruct_qa/instruct_qa_fi_train.jsonl",
-                lang=la)
+                instruct_questions, instruct_context, instruct_answers = read_dolly_sft("data/instruct_qa/instruct_qa_fi_train.jsonl",
+                                                                                        lang=la,
+                                                                                        chatml_format=chatml_format)
                 questions = questions + instruct_questions
                 context = context + instruct_context
                 answers = answers + instruct_answers
@@ -293,7 +308,9 @@ def read_data_sft(data="dolly", split="train", lang="fi"):
             else:
                 languages = [lang]
             for la in languages:
-                oasst_questions, oasst_context, oasst_answers = read_oasst_sft("data/oasst-fi/oasst1-fi-train.jsonl", lang=la)
+                oasst_questions, oasst_context, oasst_answers = read_oasst_sft("data/oasst-fi/oasst1-fi-train.jsonl", 
+                                                                               lang=la, 
+                                                                               chatml_format=chatml_format)
                 questions = questions + oasst_questions
                 context = context + oasst_context
                 answers = answers + oasst_answers
@@ -306,7 +323,9 @@ def read_data_sft(data="dolly", split="train", lang="fi"):
             else:
                 languages = [lang]
             for la in languages:
-                dolly_questions, dolly_context, dolly_answers = read_dolly_sft("data/dolly-fi/dolly-fi-valid.jsonl", lang=la)
+                dolly_questions, dolly_context, dolly_answers = read_dolly_sft("data/dolly-fi/dolly-fi-valid.jsonl", 
+                                                                               lang=la,
+                                                                               chatml_format=chatml_format)
                 questions = questions + dolly_questions
                 context = context + dolly_context
                 answers = answers + dolly_answers
@@ -317,9 +336,9 @@ def read_data_sft(data="dolly", split="train", lang="fi"):
             else:
                 languages = [lang]
             for la in languages:
-                instruct_questions, instruct_context, instruct_answers = read_dolly_sft(
-                "data/instruct_qa/instruct_qa_fi_valid.jsonl",
-                lang=la)
+                instruct_questions, instruct_context, instruct_answers = read_dolly_sft("data/instruct_qa/instruct_qa_fi_valid.jsonl",
+                                                                                        lang=la,
+                                                                                        chatml_format=chatml_format)
                 questions = questions + instruct_questions
                 context = context + instruct_context
                 answers = answers + instruct_answers
@@ -331,7 +350,8 @@ def read_data_sft(data="dolly", split="train", lang="fi"):
                 languages = [lang]
             for la in languages:
                 oasst_questions, oasst_context, oasst_answers = read_oasst_sft("data/oasst-fi/oasst1-fi-valid.jsonl",
-                                                                       lang=la)
+                                                                       lang=la,
+                                                                       chatml_format=chatml_format)
                 questions = questions + oasst_questions
                 context = context + oasst_context
                 answers = answers + oasst_answers
@@ -343,7 +363,9 @@ def read_data_sft(data="dolly", split="train", lang="fi"):
             else:
                 languages = [lang]
             for la in languages:
-                dolly_questions, dolly_context, dolly_answers = read_dolly_sft("data/dolly-fi/dolly-fi-eval.jsonl", lang=la)
+                dolly_questions, dolly_context, dolly_answers = read_dolly_sft("data/dolly-fi/dolly-fi-eval.jsonl", 
+                                                                               lang=la,
+                                                                               chatml_format=chatml_format)
                 questions = questions + dolly_questions
                 context = context + dolly_context
                 answers = answers + dolly_answers
@@ -356,7 +378,8 @@ def read_data_sft(data="dolly", split="train", lang="fi"):
             for la in languages:
                 instruct_questions, instruct_context, instruct_answers = read_dolly_sft(
                 "data/instruct_qa/instruct_qa_fi_eval.jsonl",
-                lang=la)
+                lang=la,
+                chatml_format=chatml_format)
                 questions = questions + instruct_questions
                 context = context + instruct_context
                 answers = answers + instruct_answers
@@ -368,7 +391,8 @@ def read_data_sft(data="dolly", split="train", lang="fi"):
                 languages = [lang]
             for la in languages:
                 oasst_questions, oasst_context, oasst_answers = read_oasst_sft("data/oasst-fi/oasst1-fi-eval.jsonl",
-                                                                       lang=la)
+                                                                       lang=la,
+                                                                       chatml_format=chatml_format)
                 questions = questions + oasst_questions
                 context = context + oasst_context
                 answers = answers + oasst_answers
@@ -378,6 +402,8 @@ def read_data_sft(data="dolly", split="train", lang="fi"):
         'context': context,
         'response': answers,
     }
-    return Dataset.from_dict(data)
+    data = Dataset.from_dict(data)
+    data = data.shuffle(seed=42)
+    return data
 
 

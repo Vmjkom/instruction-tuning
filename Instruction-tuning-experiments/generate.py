@@ -4,6 +4,8 @@ import sys
 import json
 import torch
 import numpy as np
+import pandas as pd
+from pathlib import Path
 
 from argparse import ArgumentParser
 from logging import warning
@@ -21,10 +23,13 @@ DTYPE_MAP = {
 
 DMAP_CHOICES = ['auto', 'sequential']
 
+user_token = "<|user|>"
+assistant_token = "<|assistant|>"
+chatml_start_token = "<|im_start|>"
+chatml_end_token = "<|im_end|>"
 
 def argparser():
     ap = ArgumentParser()
-    ap.add_argument('--tokenizer', default=None)
     ap.add_argument('--lang', default="en", type=str)
     ap.add_argument('--max_prompts', default=10, type=int)
     ap.add_argument('--min_new_tokens', default=10, type=int)
@@ -37,8 +42,13 @@ def argparser():
     ap.add_argument('--device-map', choices=DMAP_CHOICES, default='auto')
     ap.add_argument('--trust-remote-code', default=None, action='store_true')
     ap.add_argument('--transformers_cache',type=str, default="/scratch/project_2007628/transformers_cache")
-    ap.add_argument('model')
-    ap.add_argument('file', nargs='?')
+    ap.add_argument('--model', type=str)
+    ap.add_argument('--file', type=str)
+    ap.add_argument('--tokenizer', type=str)
+    ap.add_argument('--eval_only', default=False, type=lambda x: (str(x).lower() == 'true'))
+    ap.add_argument('--base_model', default=False, type=lambda x: (str(x).lower() == 'true'))
+    ap.add_argument('--chatml_format', default=False, type=lambda x: (str(x).lower() == 'true'))
+    ap.add_argument('--output_file', type=str, default=None)
     return ap
 
 
@@ -53,36 +63,63 @@ def report_memory_usage(message, out=sys.stderr):
 
 
 @timed
-def generate(prompts, tokenizer, model, args):
+def generate(prompts, tokenizer, model, args, responses):
+    bad_words_ids = tokenizer.encode(['<NAME>', ' <NAME>'])
     generated_responses = []
-    pipe = pipeline(
-        'text-generation',
-        model=model,
-        tokenizer=tokenizer,
-        do_sample=True,
-        top_k=50,
-        top_p=0.95,
-        temperature=args.temperature,
-        min_new_tokens=args.min_new_tokens,
-        max_new_tokens=args.max_new_tokens,
-        num_return_sequences=args.num_return_sequences,
-        # repetition_penalty=1.2,
-    )
-    for prompt in prompts:
-        prompt = prompt.rstrip('\n')
-        generated = pipe(prompt)
-        for g in generated:
-            text = g['generated_text']
-            print("-"*10, "Prompt:", prompt, "-"*10)
-            text = text.replace(prompt, '', 1)
-            print(text)
-            print('-'*78)
-            generated_responses.append(text)
+
+    if args.eval_only:
+        pipe = pipeline(
+            'text-generation',
+            model=model,
+            tokenizer=tokenizer,
+            do_sample=True,
+            max_new_tokens=100,
+            min_new_tokens=10,
+            temperature=0.5,
+            repetition_penalty=1.1,
+            bad_words_ids=[[word] for word in bad_words_ids],
+            num_return_sequences=args.num_return_sequences,
+            batch_size=4
+        )
+
+        prompts = [prompt.rstrip('\n') for prompt in prompts]
+        generated = pipe(prompts)
+        for index in range(len(generated)):
+            for g in generated[index]:
+                text = g['generated_text']
+                text = text.replace(prompt, '', 1)
+                generated_responses.append(text)
+    else:    
+        pipe = pipeline(
+            'text-generation',
+            model=model,
+            tokenizer=tokenizer,
+            do_sample=True,
+            max_new_tokens=100,
+            min_new_tokens=10,
+            temperature=0.5,
+            repetition_penalty=1.1,
+            bad_words_ids=[[word] for word in bad_words_ids],
+            num_return_sequences=args.num_return_sequences,
+        )
+
+        for i, prompt in enumerate(prompts):
+            prompt = prompt.rstrip('\n')
+            true_response = responses[i]
+            generated = pipe(prompt)
+            for g in generated:
+                print("-"*10, "PROMPT:", prompt, "-"*10)
+                text = g['generated_text']
+                text = text.replace(prompt, '', 1)
+                print("RESPONSE:", text)
+                # print("TRUE RESPONSE:", true_response)
+                generated_responses.append(text)
     return generated_responses
 
 
 @timed
 def load_model(args):
+    print("Loading model:", args.model)
     model = AutoModelForCausalLM.from_pretrained(
         args.model,
         device_map=args.device_map,
@@ -103,24 +140,77 @@ def check_devices(model, args):
             elif param.device.type != 'cuda':
                 warning(f'{name}.{param_name} on device {param.device}')
 
+def read_oasst_sft(path, lang='fi', chatml_format=False):
+    # end_of_text = tokenizer.eos_token
+    if lang == 'fi':
+        text_col = "text"
+    else:
+        text_col = "orig_text"
+    path = Path(path)
+    with open(path, 'rb') as f:
+        oasst_dict = list(f)
+    questions_dict = {}
+    context_wq_dict = {}
+    context_return = []
+    answers_return = []
+    questions_return = []
+    for index, json_str in enumerate(oasst_dict):
+        result = json.loads(json_str)
+        if result["role"] == "prompter":
+            if chatml_format:
+                question_combined = chatml_start_token + "user\n" + result[text_col] + chatml_end_token
+            else:
+                question_combined = user_token + result[text_col]
+            questions_dict[result["message_id"]] = question_combined
+            context_wq_dict[result["message_id"]] = " "
+            if result["parent_id"]:
+                try:
+                    context_wq_dict[result["message_id"]] = context_wq_dict[result["parent_id"]]
+                except:
+                    context_wq_dict[result["message_id"]] = " "
+        elif result["role"] == "assistant":
+            try:
+                questions_return.append(questions_dict[result["parent_id"]])
+            except:
+                continue
+            if chatml_format:
+                answer_combined = chatml_start_token + "assistant\n" + result[text_col] + chatml_end_token
+            else:
+                answer_combined = assistant_token + result[text_col]
+            answers_return.append(answer_combined)
+            if context_wq_dict[result["parent_id"]]:
+                context_return.append(context_wq_dict[result["parent_id"]])
+                context_wq_dict[result["message_id"]] = context_wq_dict[result["parent_id"]] + questions_dict[
+                    result["parent_id"]] + answer_combined
+            else:
+                context_wq_dict[result["message_id"]] = questions_dict[result["parent_id"]] + "\n" + answer_combined
+            context_wq_dict[result["message_id"]] = context_wq_dict[result["parent_id"]] + "\n" + questions_dict[
+                result["parent_id"]] + "\n" + answer_combined
+    return questions_return, context_return, answers_return
 
-def load_prompts(filepath, max_prompts=10, lang="en"):
+def load_prompts(filepath, max_prompts=10, lang="en", base_model=False, chatml_format=False):
     prompts = []
     responses = []
+    instruction = "Vastaa kysymkseen suomeksi."
+    if lang == "en":
+        instruction = "Answer the question in English."
     print("filepath:", filepath)
     if os.path.splitext(filepath)[-1] == ".txt":
         prompts = open(filepath)
     elif os.path.splitext(filepath)[-1] == ".jsonl":
-        test_data = [json.loads(line) for line in open(filepath)][:max_prompts]
         if "oasst" in filepath:
-            text_col = "text"
-            if lang == "en":
-                text_col = "orig_text"
-            for line in test_data:
-                if line['role'] == "prompter":
-                    prompt = "<|user|> " + line[text_col]
-                    prompts.append(prompt)
+            questions, contexts, answers = read_oasst_sft(filepath, lang=lang, chatml_format=chatml_format)
+            if max_prompts <= 0:
+                max_prompts = len(questions)
+            for index in range(max_prompts):
+                prompt = contexts[index] + "\n" + questions[index] + "\n" + assistant_token
+                prompts.append(prompt)
+                responses.append(answers[index])
         if "dolly" in filepath:
+            if max_prompts > 0:
+                test_data = [json.loads(line) for line in open(filepath)][:max_prompts]
+            else:
+                test_data = [json.loads(line) for line in open(filepath)]
             prompt_col = "instruction"
             context_col = "context"
             response_col = "response"
@@ -130,16 +220,30 @@ def load_prompts(filepath, max_prompts=10, lang="en"):
                 response_col = "orig_response"
             for line in test_data:
                 if not line[context_col] or line[context_col].isspace():
-                    prompt = "<|user|> " + line[prompt_col]
+                    if base_model:
+                        prompt = line[prompt_col]
+                    elif chatml_format:
+                        prompt = chatml_start_token + "user\n" + line[prompt_col] + chatml_end_token + "\n" + chatml_start_token + "assistant" + "\n"
+                    else:
+                        prompt = user_token + " " + line[prompt_col] + "\n" + assistant_token
                 else:
-                    prompt = line[context_col] + "\n<|user|> " + line[prompt_col]
+                    if base_model:
+                        prompt = line[context_col] + "\n" + line[prompt_col] 
+                    elif chatml_format:
+                        prompt = chatml_start_token + "user\n" + line[context_col] + "\n" + line[prompt_col] + chatml_end_token + "\n" + chatml_start_token + "assistant" + "\n"
+                    else:
+                        prompt = line[context_col] + "\n" + user_token + line[prompt_col] + "\n" + assistant_token
                 prompts.append(prompt.rstrip())
-                responses.append(line[response_col])
+                if chatml_format:
+                    response = line[response_col] + chatml_end_token
+                else:
+                    response = line[response_col]
+                responses.append(response)
     return prompts, responses
 
-def compute_bertscore(references, predictions):
+def compute_bertscore(references, predictions, lang):
     bertscore = load("bertscore")
-    results = bertscore.compute(predictions=predictions, references=references, lang="en")
+    results = bertscore.compute(predictions=predictions, references=references, lang=lang)
     precision = np.mean(np.array(results['precision']))
     recall = np.mean(np.array(results['recall']))
     f1 = np.mean(np.array(results['f1']))
@@ -160,16 +264,23 @@ def main(argv):
     if args.memory_usage:
         report_memory_usage('after model load')
 
-    check_devices(model, args)
+    # check_devices(model, args)
     
-    if not args.file:
-        generate(sys.stdin, tokenizer, model, args)
-    else:
-        prompts, responses = load_prompts(args.file, args.max_prompts, args.lang)
-        generated = generate(prompts, tokenizer, model, args)
-        print("prompts:", len(prompts))
-        print("generated:", len(generated))
-        results = compute_bertscore(references=prompts, predictions=generated)
+    prompts, responses = load_prompts(args.file, args.max_prompts, lang=args.lang, base_model=args.base_model, chatml_format=args.chatml_format)
+    print("prompts:", len(prompts))
+    print("responses:", len(responses))
+    generated = generate(prompts, tokenizer, model, args, responses)
+    print("generated:", len(generated))
+    results = compute_bertscore(references=responses, predictions=generated, lang=args.lang)
+    print("Model:", args.model)
+    print("Dataset:", args.file)
+    print("Lang:", args.lang)
+    if args.output_file is not None:
+        assert len(prompts) == len(responses) == len(generated)
+        output = {"prompt": prompts, "generated_response": generated, "true_response": responses}
+        output = pd.DataFrame.from_dict(output)
+        output.to_json(args.output_file)
+        print("Output file:", args.output_file)
 
     if args.memory_usage:
         report_memory_usage('after generation')

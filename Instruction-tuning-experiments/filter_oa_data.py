@@ -4,9 +4,9 @@ oasst_filenames = ['./data/oasst-fi/oasst1-fi-train.jsonl', './data/oasst-fi/oas
 for oasst_file in oasst_filenames:
     print("Filtering", oasst_file)
     data = [json.loads(line) for line in open(oasst_file)]
-    # remove messages marked as deleted
+    # include only message not marked as deleted
     filter_deleted = [entry for entry in data if entry['deleted'] == False]
-    # remove message with spam > 0.5 and not_appropriate > 0.5
+    # include only messages with spam < 0.5 and not_appropriate < 0.5 and toxicity < 0.5
     filter_spam_na = []
     for entry in filter_deleted:
         if 'labels' in entry and entry['labels'] is not None:
@@ -21,7 +21,12 @@ for oasst_file in oasst_filenames:
                     na_score = entry['labels']['value'][na_index]
                 else:
                     na_score = 0.0
-                if spam_score < 0.5 or na_score < 0.5:
+                if 'toxicity' in entry['labels']['name']:
+                    tox_index = entry['labels']['name'].index('toxicity')
+                    tox_score = entry['labels']['value'][tox_index]
+                else:
+                    tox_score = 0.0
+                if spam_score < 0.5 and na_score < 0.5 and tox_score < 0.5:
                     filter_spam_na.append(entry)
     print("Original data:", len(data))
     print("Filtered data:", len(filter_spam_na))

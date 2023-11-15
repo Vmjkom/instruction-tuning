@@ -1,7 +1,7 @@
 import sys
 from functools import wraps
 from time import time
-
+from logging import warning
 import torch
 from transformers import AutoModelForCausalLM
 from peft import (
@@ -50,3 +50,16 @@ def load_model(model_name, transformers_cache, use_lora=False, ignore_bias_buffe
         print("Loaded lora model")
     return model
 
+def filter_by_length(datasetdict, max_length):
+    for k in datasetdict:
+        dataset = datasetdict[k]
+        filtered = dataset.filter(lambda e: len(e['input_ids']) <= max_length)
+        orig_length = len(dataset['input_ids'])
+        filt_length = len(filtered['input_ids'])
+        if filt_length < orig_length:
+            warning(
+                f'filtered {k} from {orig_length} to {filt_length} '
+                f'({filt_length/orig_length:.1%}) by max_length {max_length}'
+            )
+            datasetdict[k] = filtered
+    return datasetdict

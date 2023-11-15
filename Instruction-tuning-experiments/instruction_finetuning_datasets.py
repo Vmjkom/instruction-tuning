@@ -1,5 +1,7 @@
 from datasets import Dataset
 from pathlib import Path
+import os
+import re
 import json
 import numpy as np
 
@@ -100,6 +102,57 @@ def read_dolly_sft(path, lang="fi", chatml_format=False):
             answer = assistant_token + result[response_col]
         answers.append(answer)
     return questions, context, answers
+
+
+def read_eval_tasks_sft(split="train", chatml_format=False):
+    parent_path = "/scratch/project_462000319/jburdge/data/eval_datasets"
+    eval_task_datasets = {
+        "arc_challenge": {
+            "train": "arc/arc_challenge-train-split.jsonl",
+            "valid": "arc/arc_challenge-valid-split.jsonl"
+            },
+        "drop": {
+            "train": "drop/drop-train-split.jsonl",
+            "valid": "drop/drop-valid-split.jsonl"
+            },
+        "gsm8k": {
+            "train": "gsm8k/gsm8k-train-split.jsonl",
+            "valid": "gsm8k/gsm8k-valid-split.jsonl"
+            },
+        # "hellaswag": {
+        #     "train": "hellaswag/hellaswag-train-split.jsonl",
+        #     "valid": "hellaswag/hellaswag-valid-split.jsonl"
+        #     }
+    }
+    questions = []
+    answers = []
+    contexts = []
+    for eval_task in eval_task_datasets:
+        data_path = Path(os.path.join(parent_path, eval_task_datasets[eval_task][split]))
+        results = [json.loads(line) for line in open(data_path)]
+        for result in results:
+            if eval_task != "hellaswag":
+                result = re.split("Question:|Answer:", result['text'])
+                answer = result[-1].strip()
+                question = result[-2].strip()
+                if answer and question:
+                    questions.append(question)
+                    answers.append(answer)
+                    # dummy context, don't mind it
+                    contexts.append('')
+            else:
+                result = result['text'].split(".")
+                question = result[0]+"."
+                answer = result[1]+"."
+                if len(question) > 1 and len(answer) > 1:
+                    questions.append(question)
+                    answers.append(answer)
+                    # dummy context, don't mind it
+                    contexts.append('')
+    print("Questions:", questions[-5:])
+    print("Answers:", questions[-5:])
+    return questions, contexts, answers
+            
 
 
 # Preprocessing datasets for DPO
@@ -207,7 +260,6 @@ def read_data_dpo(data="dolly", split="train", lang="fi"):
                 answers_best = answers_best + oasst_answers_best
                 answers_worst = answers_worst + oasst_answers_worst
             print("Size of oasst training data", len(questions))
-
         if "ultrafeedback" in data:
             ultra_questions, ultra_context, ultra_answers_best, ultra_answers_worst = read_ultrafeedback_dpo(
                 "data/UltraFeedback/ultrafeedback-train.jsonl")
@@ -215,7 +267,6 @@ def read_data_dpo(data="dolly", split="train", lang="fi"):
             context = context + ultra_context
             answers_best = answers_best + ultra_answers_best
             answers_worst = answers_worst + ultra_answers_worst
-
     elif "valid" in split:
         if "oasst" in data:
             if "lang" == "both":
@@ -238,7 +289,6 @@ def read_data_dpo(data="dolly", split="train", lang="fi"):
             context = context + ultra_context
             answers_best = answers_best + ultra_answers_best
             answers_worst = answers_worst + ultra_answers_worst
-
     elif "eval" in split:
         if "oasst" in data:
             if "lang" == "both":
@@ -253,7 +303,6 @@ def read_data_dpo(data="dolly", split="train", lang="fi"):
                 context = context + oasst_context
                 answers_best = answers_best + oasst_answers_best
                 answers_worst = answers_worst + oasst_answers_worst
-
         if "ultrafeedback" in data:
             ultra_questions, ultra_context, ultra_answers_best, ultra_answers_worst = read_ultrafeedback_dpo(
                 "data/UltraFeedback/ultrafeedback-eval.jsonl")
@@ -315,6 +364,13 @@ def read_data_sft(data="dolly", split="train", lang="fi", chatml_format=False):
                 context = context + oasst_context
                 answers = answers + oasst_answers
             print("Size of oasst training data", len(questions))
+        if "eval_tasks" in data:
+            eval_questions, eval_context, eval_answers = read_eval_tasks_sft(split=split, 
+                                                              chatml_format=chatml_format)
+            questions = questions + eval_questions
+            context = context + eval_context
+            answers = answers + eval_answers
+            print("Size of eval_tasks training data", len(questions))
 
     elif "valid" in split:
         if "dolly" in data:
@@ -329,7 +385,6 @@ def read_data_sft(data="dolly", split="train", lang="fi", chatml_format=False):
                 questions = questions + dolly_questions
                 context = context + dolly_context
                 answers = answers + dolly_answers
-
         if "instruct_qa" in data:
             if "lang" == "both":
                 languages = ["fi", "en"]
@@ -342,7 +397,6 @@ def read_data_sft(data="dolly", split="train", lang="fi", chatml_format=False):
                 questions = questions + instruct_questions
                 context = context + instruct_context
                 answers = answers + instruct_answers
-
         if "oasst" in data:
             if "lang" == "both":
                 languages = ["fi", "en"]
@@ -355,7 +409,12 @@ def read_data_sft(data="dolly", split="train", lang="fi", chatml_format=False):
                 questions = questions + oasst_questions
                 context = context + oasst_context
                 answers = answers + oasst_answers
-
+        if "eval_tasks" in data:
+            eval_questions, eval_context, eval_answers = read_eval_tasks_sft(split=split, 
+                                                              chatml_format=chatml_format)
+            questions = questions + eval_questions
+            context = context + eval_context
+            answers = answers + eval_answers
     elif "eval" in split:
         if "dolly" in data:
             if "lang" == "both":
@@ -369,7 +428,6 @@ def read_data_sft(data="dolly", split="train", lang="fi", chatml_format=False):
                 questions = questions + dolly_questions
                 context = context + dolly_context
                 answers = answers + dolly_answers
-
         if "instruct_qa" in data:
             if "lang" == "both":
                 languages = ["fi", "en"]
@@ -383,7 +441,6 @@ def read_data_sft(data="dolly", split="train", lang="fi", chatml_format=False):
                 questions = questions + instruct_questions
                 context = context + instruct_context
                 answers = answers + instruct_answers
-
         if "oasst" in data:
             if "lang" == "both":
                 languages = ["fi", "en"]
@@ -396,14 +453,19 @@ def read_data_sft(data="dolly", split="train", lang="fi", chatml_format=False):
                 questions = questions + oasst_questions
                 context = context + oasst_context
                 answers = answers + oasst_answers
-
+        if "eval_tasks" in data:
+            eval_questions, eval_context, eval_answers = read_eval_tasks_sft(split="valid", 
+                                                              chatml_format=chatml_format)
+            questions = questions + eval_questions
+            context = context + eval_context
+            answers = answers + eval_answers
     data = {
         'prompt': questions,
         'context': context,
         'response': answers,
     }
     data = Dataset.from_dict(data)
-    data = data.shuffle(seed=42)
+    # data = data.shuffle(seed=42)
     return data
 
 

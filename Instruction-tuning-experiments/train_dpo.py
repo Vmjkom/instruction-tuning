@@ -5,13 +5,6 @@ import numpy as np
 from logging import warning
 from datasets import DatasetDict
 from argparse import ArgumentParser
-from peft import (
-    get_peft_config,
-    get_peft_model,
-    get_peft_model_state_dict,
-    LoraConfig,
-    TaskType
-)
 
 from transformers import (
     AutoModelForCausalLM,
@@ -21,15 +14,52 @@ from transformers import (
     DataCollatorForLanguageModeling
 )
 
-
 from trl import (
     DPOTrainer,
     create_reference_model
 )
 
 # custom classes
+from utils import load_model, filter_by_length
 from instruction_finetuning_datasets import read_data_dpo
 
+model_max_length = 2048
+
+def argparser():
+    ap = ArgumentParser()
+    ap.add_argument('--deepspeed_config', type=str, default="./ds-configs/oa_deepspeed_rl_zero3.json")
+    ap.add_argument('--learning_rate', type=float, default=2e-5)
+    ap.add_argument('--model', type=str)
+    ap.add_argument('--tokenizer', type=str)
+    ap.add_argument('--task', type=str, default="dpo")
+    ap.add_argument('--num_train_epochs', type=int, default=1)
+    ap.add_argument('--per_device_batch_size', type=int, default=1)
+    ap.add_argument('--output_dir', type=str, default="output")
+    ap.add_argument('--gradient_accumulation_steps', type=int, default=4)
+    ap.add_argument('--output_file', type=str)
+    ap.add_argument('--training_data', type=str, default="hh")
+    ap.add_argument('--lang', type=str, default="en")
+    ap.add_argument('--local_rank', type=int)
+    ap.add_argument('--use_lora', default=True, type=lambda x: (str(x).lower() == 'true'))
+    ap.add_argument('--transformers_cache',type=str, default="/scratch/project_462000319/transformers_cache")
+    ap.add_argument('--dropout',type=float, default=0.1)
+    return ap
+
+def preprocess_dpo(data):  
+    prompts = data['prompt']
+    # contexts = data['context']
+    accepted = data['accepted_response']
+    rejected = data['rejected_response']
+    dpo_dataset = {
+        "prompt": [],
+        "chosen": [],
+        "rejected": []
+    }
+    for prompt, accepted, rejected in zip(prompts, accepted, rejected):
+        dpo_dataset["prompt"].append(prompt)
+        dpo_dataset["chosen"].append(accepted)
+        dpo_dataset["rejected"].append(rejected)
+    return dpo_dataset
 
 def train_dpo(args):
     # https://github.com/huggingface/trl/blob/main/examples/scripts/dpo.py
@@ -78,15 +108,6 @@ def train_dpo(args):
     # create_reference_model error: DeepSpeed ZeRO-3 is enabled and is not compatible with `create_reference_model()
     # model_ref = create_reference_model(model, num_shared_layers=6)
 
-    # add special tokens if necessary
-    # if assistant_token not in tokenizer.additional_special_tokens:
-    #     print("Adding special tokens")
-    #     if tokenizer.pad_token is None:
-    #         tokenizer.add_special_tokens({'pad_token': '<|pad|>'})
-    #     if tokenizer.sep_token is None:
-    #         tokenizer.add_special_tokens({'sep_token': '<|endofprompt|>'})
-    #     model.resize_token_embeddings(len(tokenizer))
-
     # 2-3. Load training/valid/eval datasets
     print("load train_data")
     train_data = read_data_dpo(args.training_data, split="train", lang=args.lang)
@@ -110,6 +131,8 @@ def train_dpo(args):
         batched=True
     )
 
+    print("Filtering by length")
+    dataset = filter_by_length(dataset, model_max_length)
     print("Size of training data", len(dataset['train']))
 
     # 5. initialize the DPO trainer
@@ -136,9 +159,9 @@ def train_dpo(args):
     if args.use_lora:
         dpo_trainer.model.save_pretrained(save_directory + "-lora")
         # print PeftModel param dimensions
-        for name, param in dpo_trainer.model.named_parameters():
-            if "lora" in name:
-                print(name, "---", param.shape)
+        # for name, param in dpo_trainer.model.named_parameters():
+        #     if "lora" in name:
+        #         print(name, "---", param.shape)
     else:
         dpo_trainer.save_model(save_directory)
     eval_results = dpo_trainer.evaluate(dataset['evaluation'])

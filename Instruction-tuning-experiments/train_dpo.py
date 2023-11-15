@@ -101,10 +101,10 @@ def train_dpo(args):
     # 1. load a pretrained model
     print("base model:", args.model)
     print("=== Loading model ===")
-    model = load_model(args.model, args.transformers_cache, args.use_lora, task=args.task)
+    model = load_model(args.model, args.transformers_cache, args.use_lora)
 
     print("=== Loading model_ref ===")
-    model_ref = load_model(args.model, args.transformers_cache, args.use_lora, task=args.task)
+    model_ref = load_model(args.model, args.transformers_cache, args.use_lora)
     # create_reference_model error: DeepSpeed ZeRO-3 is enabled and is not compatible with `create_reference_model()
     # model_ref = create_reference_model(model, num_shared_layers=6)
 

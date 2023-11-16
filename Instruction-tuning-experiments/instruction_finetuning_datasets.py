@@ -363,7 +363,7 @@ def read_data_dpo(data="oasst", split="train", lang="fi", max_examples=1000):
             answers_worst = answers_worst + dolly_answers_worst
     
     questions = questions[:max_examples]
-    context = context[:context]
+    context = context[:max_examples]
     answers_best = answers_best[:max_examples]
     answers_worst = answers_worst[:max_examples]
 

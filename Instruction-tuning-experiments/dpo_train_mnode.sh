@@ -12,7 +12,7 @@
 #SBATCH -e logs/%j.err
 
 
-rm -f logs/latest_mnode.out logs/latest_mnode.err
+# rm -f logs/latest_mnode.out logs/latest_mnode.err
 ln -s $SLURM_JOB_NAME-$SLURM_JOB_ID.out logs/latest_mnode.out
 ln -s $SLURM_JOB_NAME-$SLURM_JOB_ID.err logs/latest_mnode.err
 
@@ -35,7 +35,7 @@ export NCCL_SOCKET_IFNAME=hsn0
 
 #export TORCH_EXTENSIONS_DIR=/tmp/$USER/torch_extensions
 export CACHE=$TRANSFORMERS_CACHE
-export MODEL_PATH=/scratch/project_462000319/$USER/oa_models
+# export MODEL_PATH=/scratch/project_462000319/$USER/oa_models
 export LOGS=/scratch/project_462000319/$USER/logs
 export PYTORCH_ROCM_ARCH=gfx90a
 export TOKENIZERS_PARALLELISM=true
@@ -50,6 +50,7 @@ export WORLD_SIZE=$((SLURM_GPUS_ON_NODE*SLURM_NNODES))
 export RDZV_HOST=$(hostname)
 export RDZV_PORT=29400
 #export CUDA_LAUNCH_BLOCKING=1
+echo master_addr
 
 
 #LOGGING
@@ -61,16 +62,17 @@ export OMP_NUM_THREADS=1
 
 srun -l python3 -m torch.distributed.run --nnodes=$SLURM_NNODES \
         --nproc-per-node=$SLURM_GPUS_ON_NODE \
-        --max-restarts=3 \
+        --node_rank $LOCAL_RANK \
+        --master_addr $MASTER_ADDR \
+        --master_port $MASTER_PORT \
         --rdzv-id=$SLURM_JOB_ID \
         --rdzv-backend=c10d \
         --rdzv-endpoint="$RDZV_HOST:$RDZV_PORT" \
         train_dpo.py \
-        --model "/scratch/project_462000319/zosaelai2/models/sft_finetuned/merged-33B_torch_step70128_bfloat16-dolly-fi-2epochs-oasst-fi-2epochs" \
+        --model "/scratch/project_462000319/zosaelai2/models/sft_finetuned/merged-33B_torch_step70128_bfloat16-oasst-dolly-both-6epochs" \
         --tokenizer "/scratch/project_462000319/tokenizers/tokenizer_v6_fixed_fin" \
         --training_data "oasst" \
         --lang "en" \
-        --task "dpo" \
         --num_train_epochs 1 \
 
 # deepspeed --num_gpus=8 train_dpo.py \

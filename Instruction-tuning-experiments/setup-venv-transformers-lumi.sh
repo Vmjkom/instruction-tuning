@@ -19,9 +19,14 @@
 # This script creates the directories venv and apex. If either of
 # these exists, ask to delete.
 
+export TRANSFORMERS_CACHE=/scratch/project_462000319/.cache
+export TOKENIZERS_PARALLELISM=false
+export PYTHONPATH="/scratch/project_462000319/zosaelai2"
+
 # Load modules
 module load cray-python
-module load LUMI/22.08 partition/G rocm5.4.2
+module load LUMI/22.08 partition/G
+module load rocm/5.2.3
 
 #module use /pfs/lustrep2/projappl/project_462000125/samantao-public/mymodules
 #module load aws-ofi-rccl/rocm-5.2.3
@@ -30,8 +35,8 @@ module use /appl/local/csc/modulefiles/
 module load pytorch
 
 # Create and activate venv
-python -m venv --system-site-packages .venv
-source .venv/bin/activate
+python -m venv --system-site-packages .venv2
+source .venv2/bin/activate
 
 # Upgrade pip etc.
 python -m pip install --upgrade pip setuptools wheel
@@ -40,7 +45,8 @@ python -m pip install --upgrade pip setuptools wheel
 #python -m pip install --upgrade torch==1.13.1+rocm5.2 --extra-index-url https://download.pytorch.org/whl/rocm5.2
 python -m pip install --upgrade numpy datasets evaluate accelerate scikit-learn nltk
 python -m pip install --upgrade /scratch/project_462000319/zosaelai2/transformers
-python -m pip install --upgrade deepspeed==0.10.3
+python -m pip install --upgrade trl
+python -m pip install --upgrade deepspeed
 python -m pip install --upgrade tensorboard
 python -m pip install --upgrade peft
 python -m pip install --upgrade seqeval

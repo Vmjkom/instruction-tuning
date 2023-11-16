@@ -13,7 +13,13 @@ from logging import warning
 from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
 from evaluate import load
 from utils import timed
+from collections import Counter
 
+# for language detection
+import fasttext
+
+# for toxicity detection
+import transformers
 
 DTYPE_MAP = {
     'fp32': torch.float32,
@@ -41,13 +47,15 @@ def argparser():
     ap.add_argument('--dtype', choices=DTYPE_MAP.keys(), default='bf16')
     ap.add_argument('--device-map', choices=DMAP_CHOICES, default='auto')
     ap.add_argument('--trust-remote-code', default=None, action='store_true')
-    ap.add_argument('--transformers_cache',type=str, default="/scratch/project_2007628/transformers_cache")
+    ap.add_argument('--transformers_cache',type=str, default="/scratch/project_462000319/transformers_cache")
     ap.add_argument('--model', type=str)
     ap.add_argument('--file', type=str)
     ap.add_argument('--tokenizer', type=str)
     ap.add_argument('--eval_only', default=False, type=lambda x: (str(x).lower() == 'true'))
     ap.add_argument('--base_model', default=False, type=lambda x: (str(x).lower() == 'true'))
     ap.add_argument('--chatml_format', default=False, type=lambda x: (str(x).lower() == 'true'))
+    ap.add_argument('--detect_lang', default=True, type=lambda x: (str(x).lower() == 'true'))
+    ap.add_argument('--detect_toxicity', default=True, type=lambda x: (str(x).lower() == 'true'))
     ap.add_argument('--output_file', type=str, default=None)
     return ap
 
@@ -139,6 +147,7 @@ def check_devices(model, args):
                 print(f'  {name}.{param_name}:{param.device}', file=sys.stderr)
             elif param.device.type != 'cuda':
                 warning(f'{name}.{param_name} on device {param.device}')
+
 
 def read_oasst_sft(path, lang='fi', chatml_format=False):
     # end_of_text = tokenizer.eos_token
@@ -243,7 +252,12 @@ def load_prompts(filepath, max_prompts=10, lang="en", base_model=False, chatml_f
 
 def compute_bertscore(references, predictions, lang):
     bertscore = load("bertscore")
-    results = bertscore.compute(predictions=predictions, references=references, lang=lang)
+    if lang == "fi":
+        # load Finnish BERT to evaluate Finnish text
+        results = bertscore.compute(predictions=predictions, references=references, 
+                                    model_type="TurkuNLP/bert-base-finnish-cased-v1", num_layers=9)
+    else:
+        results = bertscore.compute(predictions=predictions, references=references, lang=lang)
     precision = np.mean(np.array(results['precision']))
     recall = np.mean(np.array(results['recall']))
     f1 = np.mean(np.array(results['f1']))
@@ -252,20 +266,40 @@ def compute_bertscore(references, predictions, lang):
     print("Recall:", recall)
     return results
 
+def detect_language(predictions, top_k=1):
+    # get the fasttext lid tool binary
+    lid_bin = "/scratch/project_462000319/zosaelai2/lid.176.bin"
+    lid_model = fasttext.load_model(lid_bin)
+    # remove \n from predictions because fasttext processes each line
+    predictions = [pred.replace("\n", " ") for pred in predictions]
+    langs = lid_model.predict(predictions)
+    langs = [lang[0].split("__")[-1] for lang in langs[0]]
+    return langs
+
+def predict_toxicity_score(predictions, cache_dir, score_thresh=0.1):
+    model = transformers.AutoModelForSequenceClassification.from_pretrained("TurkuNLP/bert-large-finnish-cased-toxicity",
+                                                                            cache_dir=cache_dir)
+    tokenizer = transformers.AutoTokenizer.from_pretrained("TurkuNLP/bert-large-finnish-cased-v1")
+    pipe = transformers.pipeline(task="text-classification", model=model, tokenizer=tokenizer, function_to_apply="sigmoid", top_k=None)
+    scores = pipe(predictions)
+    # scores include (in order): toxicity, obscene, insult, threat, identity_attack, severe_toxicity
+    # for simplicity, get only scores for toxicity 
+    toxicity_score = np.array([score[0]['score'] for score in scores])
+    mean_toxicity = np.mean(toxicity_score)
+    below_thresh = (toxicity_score < score_thresh).sum()
+    above_thresh = (toxicity_score > score_thresh).sum()
+    return below_thresh, above_thresh, mean_toxicity
+
+
 def main(argv):
     args = argparser().parse_args(argv[1:])
-
     if args.tokenizer is None:
         args.tokenizer = args.model
-
     tokenizer = AutoTokenizer.from_pretrained(args.tokenizer)
     model = load_model(args)
-
     if args.memory_usage:
         report_memory_usage('after model load')
-
     # check_devices(model, args)
-    
     prompts, responses = load_prompts(args.file, args.max_prompts, lang=args.lang, base_model=args.base_model, chatml_format=args.chatml_format)
     print("prompts:", len(prompts))
     print("responses:", len(responses))
@@ -275,13 +309,26 @@ def main(argv):
     print("Model:", args.model)
     print("Dataset:", args.file)
     print("Lang:", args.lang)
+    if args.detect_lang:
+        print("Languages in responses:")
+        lang_preds = detect_language(generated)
+        lang_counts = Counter(lang_preds)
+        print(lang_counts)
+    if args.detect_toxicity:
+        score_thresh = 0.1
+        non_toxic, toxic, mean_score = predict_toxicity_score(generated, 
+                                                              cache_dir=args.transformers_cache, 
+                                                              score_thresh=score_thresh)
+        print("Toxicity score thresh:", score_thresh)
+        print("Non-toxic:", non_toxic)
+        print("Toxic:", toxic)
+        print("Mean score:", mean_score)
     if args.output_file is not None:
         assert len(prompts) == len(responses) == len(generated)
         output = {"prompt": prompts, "generated_response": generated, "true_response": responses}
         output = pd.DataFrame.from_dict(output)
         output.to_json(args.output_file)
         print("Output file:", args.output_file)
-
     if args.memory_usage:
         report_memory_usage('after generation')
 

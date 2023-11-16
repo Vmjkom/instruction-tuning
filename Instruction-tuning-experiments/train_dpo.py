@@ -16,7 +16,7 @@ from transformers import (
 
 from trl import (
     DPOTrainer,
-    create_reference_model
+    # create_reference_model
 )
 
 # custom classes
@@ -31,7 +31,6 @@ def argparser():
     ap.add_argument('--learning_rate', type=float, default=2e-5)
     ap.add_argument('--model', type=str)
     ap.add_argument('--tokenizer', type=str)
-    ap.add_argument('--task', type=str, default="dpo")
     ap.add_argument('--num_train_epochs', type=int, default=1)
     ap.add_argument('--per_device_batch_size', type=int, default=1)
     ap.add_argument('--output_dir', type=str, default="output")
@@ -69,14 +68,14 @@ def train_dpo(args):
     print("Saving checkpoints to", output_dir)
 
     # This needs to be defined before model loading for deepspeed stage 3 to work correctly
-    # 4. initialize training arguments:
+    # initialize training arguments
     training_args = TrainingArguments(
-        deepspeed="./ds-configs/oa_deepspeed_rl_zero3.json",
+        deepspeed="./ds-configs/oa_deepspeed_rl_zero3_warmuplr.json",
         remove_unused_columns=False,
         output_dir=output_dir,
         logging_dir=log_dir,
-        evaluation_strategy="steps",
-        eval_steps=50,
+        evaluation_strategy="no",
+        # eval_steps=100,
         num_train_epochs=args.num_train_epochs,
         save_strategy="epoch",
         save_total_limit=1,
@@ -87,9 +86,9 @@ def train_dpo(args):
         logging_steps=10,
         logging_first_step=True,
         report_to='tensorboard',
-        learning_rate=args.learning_rate,
+        # learning_rate=args.learning_rate,
         optim="rmsprop",
-        warmup_steps=100,
+        # warmup_steps=100,
         bf16=True,
     )
 
@@ -131,8 +130,9 @@ def train_dpo(args):
         batched=True
     )
 
-    print("Filtering by length")
-    dataset = filter_by_length(dataset, model_max_length)
+    # print("Filtering by length")
+    # dataset = filter_by_length(dataset, model_max_length)
+
     print("Size of training data", len(dataset['train']))
 
     # 5. initialize the DPO trainer
@@ -145,8 +145,8 @@ def train_dpo(args):
         eval_dataset=dataset['validation'],
         tokenizer=tokenizer,
         max_length=model_max_length,
-        max_target_length=256,
-        max_prompt_length=256,
+        max_target_length=128,
+        max_prompt_length=128,
         padding_value=tokenizer.pad_token_id
         # generate_during_eval=True,
     )
@@ -173,3 +173,10 @@ def train_dpo(args):
     print('Gradient accumulation steps:', args.gradient_accumulation_steps)
     print('Evaluation results:', eval_results['eval_loss'])
     print('Save directory:', save_directory)
+
+def main(argv):
+    args = argparser().parse_args(argv[1:])
+    train_dpo(args)
+
+if __name__ == '__main__':
+    sys.exit(main(sys.argv))

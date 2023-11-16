@@ -149,11 +149,8 @@ def read_eval_tasks_sft(split="train", chatml_format=False):
                     answers.append(answer)
                     # dummy context, don't mind it
                     contexts.append('')
-    print("Questions:", questions[-5:])
-    print("Answers:", questions[-5:])
     return questions, contexts, answers
             
-
 
 # Preprocessing datasets for DPO
 def read_oasst_dpo(path, lang='fi', score_type='quality'):
@@ -211,6 +208,7 @@ def read_oasst_dpo(path, lang='fi', score_type='quality'):
             answers_best_list.append(sorted_answers[0][0])
             answers_worst_list.append(sorted_answers[-1][0])
     return questions_list, contexts_list, answers_best_list, answers_worst_list
+
 def read_ultrafeedback_dpo(path):
     data = [json.loads(line) for line in open(path)]
     prompts_list = []
@@ -239,10 +237,43 @@ def read_ultrafeedback_dpo(path):
     return prompts_list, contexts_list, answers_best_list, answers_worst_list
 
 
-def read_data_dpo(data="dolly", split="train", lang="fi"):
+def read_dolly_lang_alignment_dpo(path):
+    languages = ["fi", "en"]
+    col_names = {
+        "fi": {
+            "instruction": "instruction",
+            "context": "context",
+            "response": "response"
+            },
+        "en": {
+            "instruction": "orig_instruction",
+            "context": "orig_context",
+            "response": "orig_response"
+        }
+    }
+    path = Path(path)
+    with open(path, 'rb') as f:
+        dolly_dict = list(f)
+    prompts_list = []
+    contexts_list = []
+    answers_chosen_list = []
+    answers_rejected_list = []
+    for json_str in dolly_dict:
+        entry = json.loads(json_str)
+        prompts = [entry[col_names[lang]["instruction"]] for lang in languages]
+        contexts = [entry[col_names[lang]["context"]] for lang in languages]
+        answers_chosen = [entry[col_names[lang]["response"]] for lang in languages]
+        answers_rejected = [entry[col_names[lang]["response"]] for lang in reversed(languages)]
+        if answers_rejected[0] != answers_rejected[1]:
+            prompts_list.extend(prompts)
+            contexts_list.extend(contexts)
+            answers_chosen_list.extend(answers_chosen)
+            answers_rejected_list.extend(answers_rejected)
+    return prompts_list, contexts_list, answers_chosen_list, answers_rejected_list
+
+def read_data_dpo(data="oasst", split="train", lang="fi"):
     questions = []
     context = []
-    answers = []
     answers_best = []
     answers_worst = []
     if "train" in split:
@@ -267,6 +298,13 @@ def read_data_dpo(data="dolly", split="train", lang="fi"):
             context = context + ultra_context
             answers_best = answers_best + ultra_answers_best
             answers_worst = answers_worst + ultra_answers_worst
+        if "dolly" in data:
+            dolly_questions, dolly_context, dolly_answers_best, dolly_answers_worst = read_dolly_lang_alignment_dpo(
+                "data/dolly-fi/dolly-fi-train.jsonl")
+            questions = questions + dolly_questions
+            context = context + dolly_context
+            answers_best = answers_best + dolly_answers_best
+            answers_worst = answers_worst + dolly_answers_worst
     elif "valid" in split:
         if "oasst" in data:
             if "lang" == "both":
@@ -281,7 +319,6 @@ def read_data_dpo(data="dolly", split="train", lang="fi"):
                 context = context + oasst_context
                 answers_best = answers_best + oasst_answers_best
                 answers_worst = answers_worst + oasst_answers_worst
-
         if "ultrafeedback" in data:
             ultra_questions, ultra_context, ultra_answers_best, ultra_answers_worst = read_ultrafeedback_dpo(
                 "data/UltraFeedback/ultrafeedback-valid.jsonl")
@@ -289,6 +326,13 @@ def read_data_dpo(data="dolly", split="train", lang="fi"):
             context = context + ultra_context
             answers_best = answers_best + ultra_answers_best
             answers_worst = answers_worst + ultra_answers_worst
+        if "dolly" in data:
+            dolly_questions, dolly_context, dolly_answers_best, dolly_answers_worst = read_dolly_lang_alignment_dpo(
+                "data/dolly-fi/dolly-fi-valid.jsonl")
+            questions = questions + dolly_questions
+            context = context + dolly_context
+            answers_best = answers_best + dolly_answers_best
+            answers_worst = answers_worst + dolly_answers_worst
     elif "eval" in split:
         if "oasst" in data:
             if "lang" == "both":
@@ -310,6 +354,19 @@ def read_data_dpo(data="dolly", split="train", lang="fi"):
             context = context + ultra_context
             answers_best = answers_best + ultra_answers_best
             answers_worst = answers_worst + ultra_answers_worst
+        if "dolly" in data:
+            dolly_questions, dolly_context, dolly_answers_best, dolly_answers_worst = read_dolly_lang_alignment_dpo(
+                "data/dolly-fi/dolly-fi-eval.jsonl")
+            questions = questions + dolly_questions
+            context = context + dolly_context
+            answers_best = answers_best + dolly_answers_best
+            answers_worst = answers_worst + dolly_answers_worst
+
+    # print("Questions:", questions[:10])
+    # print("Answers chosen:", answers_best[:10])
+    # print("Answers worst:", answers_worst[:10])
+    # print("Contexts:", context[:5])
+    
     data = {
         'prompt': questions,
         'context': context,
@@ -357,7 +414,7 @@ def read_data_sft(data="dolly", split="train", lang="fi", chatml_format=False):
             else:
                 languages = [lang]
             for la in languages:
-                oasst_questions, oasst_context, oasst_answers = read_oasst_sft("data/oasst-fi/oasst1-fi-train.jsonl", 
+                oasst_questions, oasst_context, oasst_answers = read_oasst_sft("data/oasst-fi/oasst1-fi-train-filter.jsonl", 
                                                                                lang=la, 
                                                                                chatml_format=chatml_format)
                 questions = questions + oasst_questions
@@ -403,7 +460,7 @@ def read_data_sft(data="dolly", split="train", lang="fi", chatml_format=False):
             else:
                 languages = [lang]
             for la in languages:
-                oasst_questions, oasst_context, oasst_answers = read_oasst_sft("data/oasst-fi/oasst1-fi-valid.jsonl",
+                oasst_questions, oasst_context, oasst_answers = read_oasst_sft("data/oasst-fi/oasst1-fi-valid-filter.jsonl",
                                                                        lang=la,
                                                                        chatml_format=chatml_format)
                 questions = questions + oasst_questions
@@ -447,7 +504,7 @@ def read_data_sft(data="dolly", split="train", lang="fi", chatml_format=False):
             else:
                 languages = [lang]
             for la in languages:
-                oasst_questions, oasst_context, oasst_answers = read_oasst_sft("data/oasst-fi/oasst1-fi-eval.jsonl",
+                oasst_questions, oasst_context, oasst_answers = read_oasst_sft("data/oasst-fi/oasst1-fi-eval-filter.jsonl",
                                                                        lang=la,
                                                                        chatml_format=chatml_format)
                 questions = questions + oasst_questions

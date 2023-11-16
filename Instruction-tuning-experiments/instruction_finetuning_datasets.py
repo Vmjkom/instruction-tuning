@@ -271,7 +271,7 @@ def read_dolly_lang_alignment_dpo(path):
             answers_rejected_list.extend(answers_rejected)
     return prompts_list, contexts_list, answers_chosen_list, answers_rejected_list
 
-def read_data_dpo(data="oasst", split="train", lang="fi"):
+def read_data_dpo(data="oasst", split="train", lang="fi", max_examples=1000):
     questions = []
     context = []
     answers_best = []
@@ -361,12 +361,12 @@ def read_data_dpo(data="oasst", split="train", lang="fi"):
             context = context + dolly_context
             answers_best = answers_best + dolly_answers_best
             answers_worst = answers_worst + dolly_answers_worst
-
-    # print("Questions:", questions[:10])
-    # print("Answers chosen:", answers_best[:10])
-    # print("Answers worst:", answers_worst[:10])
-    # print("Contexts:", context[:5])
     
+    questions = questions[:max_examples]
+    context = context[:context]
+    answers_best = answers_best[:max_examples]
+    answers_worst = answers_worst[:max_examples]
+
     data = {
         'prompt': questions,
         'context': context,

@@ -7,11 +7,8 @@ from datasets import DatasetDict
 from argparse import ArgumentParser
 
 from transformers import (
-    AutoModelForCausalLM,
     AutoTokenizer,
     TrainingArguments,
-    Trainer,
-    DataCollatorForLanguageModeling
 )
 
 from trl import (
@@ -36,7 +33,8 @@ def argparser():
     ap.add_argument('--output_dir', type=str, default="output")
     ap.add_argument('--gradient_accumulation_steps', type=int, default=4)
     ap.add_argument('--output_file', type=str)
-    ap.add_argument('--training_data', type=str, default="hh")
+    ap.add_argument('--training_data', type=str, default="oasst")
+    ap.add_argument('--max_examples', type=int, default=1000)
     ap.add_argument('--lang', type=str, default="en")
     ap.add_argument('--local_rank', type=int)
     ap.add_argument('--use_lora', default=True, type=lambda x: (str(x).lower() == 'true'))
@@ -46,7 +44,7 @@ def argparser():
 
 def preprocess_dpo(data):  
     prompts = data['prompt']
-    # contexts = data['context']
+    contexts = data['context']
     accepted = data['accepted_response']
     rejected = data['rejected_response']
     dpo_dataset = {
@@ -54,8 +52,12 @@ def preprocess_dpo(data):
         "chosen": [],
         "rejected": []
     }
-    for prompt, accepted, rejected in zip(prompts, accepted, rejected):
-        dpo_dataset["prompt"].append(prompt)
+    for prompt, context, accepted, rejected in zip(prompts, contexts, accepted, rejected):
+        if not context or context.isspace():
+            combined_prompt = prompt
+        else:
+            combined_prompt = context + "\n" + prompt
+        dpo_dataset["prompt"].append(combined_prompt)
         dpo_dataset["chosen"].append(accepted)
         dpo_dataset["rejected"].append(rejected)
     return dpo_dataset
@@ -109,11 +111,11 @@ def train_dpo(args):
 
     # 2-3. Load training/valid/eval datasets
     print("load train_data")
-    train_data = read_data_dpo(args.training_data, split="train", lang=args.lang)
+    train_data = read_data_dpo(args.training_data, split="train", lang=args.lang, max_examples=args.max_examples)
     print("load val_data")
-    val_data = read_data_dpo(args.training_data, split="valid", lang=args.lang)
+    val_data = read_data_dpo(args.training_data, split="valid", lang=args.lang, max_examples=args.max_examples)
     print("load eval_data")
-    eval_data = read_data_dpo(args.training_data, split="eval", lang=args.lang)
+    eval_data = read_data_dpo(args.training_data, split="eval", lang=args.lang, max_examples=args.max_examples)
 
     print("Size of training data", len(train_data))
     print("Size of validation data", len(val_data))
@@ -158,10 +160,6 @@ def train_dpo(args):
     save_directory = os.path.join("../../models/dpo_finetuned/", base_model_name + "-" + args.training_data + "-" + args.lang)
     if args.use_lora:
         dpo_trainer.model.save_pretrained(save_directory + "-lora")
-        # print PeftModel param dimensions
-        # for name, param in dpo_trainer.model.named_parameters():
-        #     if "lora" in name:
-        #         print(name, "---", param.shape)
     else:
         dpo_trainer.save_model(save_directory)
     eval_results = dpo_trainer.evaluate(dataset['evaluation'])

@@ -22,11 +22,6 @@ from transformers import (
 )
 
 
-# from trl import (
-#     DPOTrainer,
-#     create_reference_model
-# )
-
 # custom classes
 from instruction_finetuning_datasets import read_data_sft
 
@@ -51,6 +46,8 @@ def argparser():
     ap.add_argument('--gradient_accumulation_steps', type=int, default=4)
     ap.add_argument('--output_file', type=str)
     ap.add_argument('--training_data', type=str, default="oasst")
+    ap.add_argument('--eval_task', type=str, default="arc_challenge")
+    ap.add_argument('--data_split', type=int, default=1)
     ap.add_argument('--lang', type=str, default="fi")
     ap.add_argument('--local_rank', type=int)
     ap.add_argument('--use_lora', default=True, type=lambda x: (str(x).lower() == 'true'))
@@ -152,37 +149,34 @@ def preprocess_sft(data, tokenizer):   # Sampo's script -- modified with prompt 
     tokenized = tokenizer(combined, truncation=True)
     return tokenized
 
-def preprocess_dpo(data):  
-    prompts = data['prompt']
-    # contexts = data['context']
-    accepted = data['accepted_response']
-    rejected = data['rejected_response']
-    dpo_dataset = {
-        "prompt": [],
-        "chosen": [],
-        "rejected": []
-    }
-    for prompt, accepted, rejected in zip(prompts, accepted, rejected):
-        dpo_dataset["prompt"].append(prompt)
-        dpo_dataset["chosen"].append(accepted)
-        dpo_dataset["rejected"].append(rejected)
-    return dpo_dataset
-
 
 def train_sft(args):
     log_dir = './logs/'
     base_model_name = os.path.basename(args.model)
     if args.chatml_format:
-        output_dir = os.path.join("../../models/sft_checkpoints/", base_model_name + 
+        if args.training_data == "eval_tasks":
+            output_dir = os.path.join("../../models/sft_checkpoints/", base_model_name + 
                                 "-chatml" +
-                                "-" + args.training_data + 
-                                "-" + args.lang +
+                                "-" + args.eval_task + 
+                                "-" + str(args.data_split) +
                                 "-" + str(args.num_train_epochs) + "epochs")
+        else:
+            output_dir = os.path.join("../../models/sft_checkpoints/", base_model_name + 
+                                    "-chatml" +
+                                    "-" + args.training_data + 
+                                    "-" + args.lang +
+                                    "-" + str(args.num_train_epochs) + "epochs")
     else:
-        output_dir = os.path.join("../../models/sft_checkpoints/", base_model_name + 
-                                  "-" + args.training_data + 
-                                  "-" + args.lang +
-                                  "-" + str(args.num_train_epochs) + "epochs")
+        if args.training_data == "eval_tasks":
+            output_dir = os.path.join("../../models/sft_checkpoints/", base_model_name + 
+                                      "-" + args.eval_task + 
+                                      "-" + str(args.data_split) +
+                                      "-" + str(args.num_train_epochs) + "epochs")
+        else:
+            output_dir = os.path.join("../../models/sft_checkpoints/", base_model_name + 
+                                      "-" + args.training_data + 
+                                      "-" + args.lang +
+                                      "-" + str(args.num_train_epochs) + "epochs")
     print("Saving checkpoints to", output_dir)
 
     # This needs to be defined before model loading for deepspeed stage 3 to work correctly
@@ -211,7 +205,8 @@ def train_sft(args):
         gradient_checkpointing=True,
         report_to='tensorboard',
         bf16=True,
-        warmup_steps=300,
+        #warmup_steps=300,
+        warmup_ratio=0.1,
         half_precision_backend="cuda_amp",
         local_rank=args.local_rank,
     )
@@ -242,10 +237,9 @@ def train_sft(args):
     # resize_token_embeddings(model, len(tokenizer))
 
     print("Loading data for SFT")
-    print("args.chatml_format:", args.chatml_format)
-    train_data = read_data_sft(args.training_data, split="train", lang=args.lang, chatml_format=args.chatml_format)
-    val_data = read_data_sft(args.training_data, split="valid", lang=args.lang, chatml_format=args.chatml_format)
-    eval_data = read_data_sft(args.training_data, split="eval", lang=args.lang, chatml_format=args.chatml_format)
+    train_data = read_data_sft(args.training_data, split="train", lang=args.lang, chatml_format=args.chatml_format, eval_task=args.eval_task)
+    val_data = read_data_sft(args.training_data, split="valid", lang=args.lang, chatml_format=args.chatml_format, eval_task=args.eval_task)
+    eval_data = read_data_sft(args.training_data, split="eval", lang=args.lang, chatml_format=args.chatml_format, eval_task=args.eval_task)
 
     print("Size of training data", len(train_data))
     print("Size of validation data", len(val_data))

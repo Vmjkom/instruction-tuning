@@ -17,8 +17,8 @@ from trl import (
 )
 
 # custom classes
-from utils import load_model, filter_by_length
-from instruction_finetuning_datasets import read_data_dpo
+from utils import load_model
+from dpo_finetuning_datasets import read_data_dpo
 
 model_max_length = 2048
 

@@ -27,14 +27,15 @@ def logits_argmax(logits):
     return logits.argmax(axis=-1)
 
 
-def load_model(model_name, transformers_cache, use_lora=False, ignore_bias_buffers=False):
+def load_model(model_name, transformers_cache, use_lora=False, ignore_bias_buffers=True):
     print("load_model")
     model = AutoModelForCausalLM.from_pretrained(
         model_name,
         cache_dir=transformers_cache,
         num_labels=1,
-        torch_dtype=torch.bfloat16
+        torch_dtype=torch.bfloat16,
     )
+
     if ignore_bias_buffers:
         # torch distributed hack
         model._ddp_params_and_buffers_to_ignore = [
@@ -46,8 +47,10 @@ def load_model(model_name, transformers_cache, use_lora=False, ignore_bias_buffe
         peft_config = LoraConfig(task_type=TaskType.CAUSAL_LM, inference_mode=False, r=8, lora_alpha=32,
                                      lora_dropout=0.1)
         model = get_peft_model(model, peft_config)
+        model.base_model.model.transformer.enable_input_require_grads()
         model.print_trainable_parameters()
         print("Loaded lora model")
+    # model.gradient_checkpointing_enable()
     return model
 
 def filter_by_length(datasetdict, max_length):

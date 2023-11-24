@@ -5,7 +5,7 @@ import re
 import json
 import numpy as np
 
-def read_oasst_dpo(path, lang='fi', score_type='quality'):
+def read_oasst(path, lang='fi', score_type='quality'):
     if lang == 'fi':
         text_col = "text"
     else:
@@ -63,7 +63,7 @@ def read_oasst_dpo(path, lang='fi', score_type='quality'):
 
 
 
-def read_ultrafeedback_dpo(path):
+def read_ultrafeedback(path):
     data = [json.loads(line) for line in open(path)]
     prompts_list = []
     contexts_list = []
@@ -91,7 +91,7 @@ def read_ultrafeedback_dpo(path):
     return prompts_list, contexts_list, answers_best_list, answers_worst_list
 
 
-def read_dolly_lang_alignment_dpo(path):
+def read_dolly_lang_alignment(path):
     languages = ["fi", "en"]
     col_names = {
         "fi": {
@@ -138,7 +138,7 @@ def read_data_dpo(data="oasst", split="train", lang="fi", max_examples=1000):
             else:
                 languages = [lang]
             for la in languages:
-                oasst_questions, oasst_context, oasst_answers_best, oasst_answers_worst = read_oasst_dpo(
+                oasst_questions, oasst_context, oasst_answers_best, oasst_answers_worst = read_oasst(
                 "data/oasst-fi/oasst1-fi-train.jsonl",
                 lang=la)
                 questions = questions + oasst_questions
@@ -147,14 +147,14 @@ def read_data_dpo(data="oasst", split="train", lang="fi", max_examples=1000):
                 answers_worst = answers_worst + oasst_answers_worst
             print("Size of oasst training data", len(questions))
         if "ultrafeedback" in data:
-            ultra_questions, ultra_context, ultra_answers_best, ultra_answers_worst = read_ultrafeedback_dpo(
+            ultra_questions, ultra_context, ultra_answers_best, ultra_answers_worst = read_ultrafeedback(
                 "data/UltraFeedback/ultrafeedback-train.jsonl")
             questions = questions + ultra_questions
             context = context + ultra_context
             answers_best = answers_best + ultra_answers_best
             answers_worst = answers_worst + ultra_answers_worst
         if "dolly" in data:
-            dolly_questions, dolly_context, dolly_answers_best, dolly_answers_worst = read_dolly_lang_alignment_dpo(
+            dolly_questions, dolly_context, dolly_answers_best, dolly_answers_worst = read_dolly_lang_alignment(
                 "data/dolly-fi/dolly-fi-train.jsonl")
             questions = questions + dolly_questions
             context = context + dolly_context
@@ -167,7 +167,7 @@ def read_data_dpo(data="oasst", split="train", lang="fi", max_examples=1000):
             else:
                 languages = [lang]
             for la in languages:
-                oasst_questions, oasst_context, oasst_answers_best, oasst_answers_worst = read_oasst_dpo(
+                oasst_questions, oasst_context, oasst_answers_best, oasst_answers_worst = read_oasst(
                 "data/oasst-fi/oasst1-fi-valid.jsonl",
                 lang=la)
                 questions = questions + oasst_questions
@@ -175,14 +175,14 @@ def read_data_dpo(data="oasst", split="train", lang="fi", max_examples=1000):
                 answers_best = answers_best + oasst_answers_best
                 answers_worst = answers_worst + oasst_answers_worst
         if "ultrafeedback" in data:
-            ultra_questions, ultra_context, ultra_answers_best, ultra_answers_worst = read_ultrafeedback_dpo(
+            ultra_questions, ultra_context, ultra_answers_best, ultra_answers_worst = read_ultrafeedback(
                 "data/UltraFeedback/ultrafeedback-valid.jsonl")
             questions = questions + ultra_questions
             context = context + ultra_context
             answers_best = answers_best + ultra_answers_best
             answers_worst = answers_worst + ultra_answers_worst
         if "dolly" in data:
-            dolly_questions, dolly_context, dolly_answers_best, dolly_answers_worst = read_dolly_lang_alignment_dpo(
+            dolly_questions, dolly_context, dolly_answers_best, dolly_answers_worst = read_dolly_lang_alignment(
                 "data/dolly-fi/dolly-fi-valid.jsonl")
             questions = questions + dolly_questions
             context = context + dolly_context
@@ -195,7 +195,7 @@ def read_data_dpo(data="oasst", split="train", lang="fi", max_examples=1000):
             else:
                 languages = [lang]
             for la in languages:
-                oasst_questions, oasst_context, oasst_answers_best, oasst_answers_worst = read_oasst_dpo(
+                oasst_questions, oasst_context, oasst_answers_best, oasst_answers_worst = read_oasst(
                 "data/oasst-fi/oasst1-fi-eval.jsonl",
                 lang=la)
                 questions = questions + oasst_questions
@@ -203,14 +203,14 @@ def read_data_dpo(data="oasst", split="train", lang="fi", max_examples=1000):
                 answers_best = answers_best + oasst_answers_best
                 answers_worst = answers_worst + oasst_answers_worst
         if "ultrafeedback" in data:
-            ultra_questions, ultra_context, ultra_answers_best, ultra_answers_worst = read_ultrafeedback_dpo(
+            ultra_questions, ultra_context, ultra_answers_best, ultra_answers_worst = read_ultrafeedback(
                 "data/UltraFeedback/ultrafeedback-eval.jsonl")
             questions = questions + ultra_questions
             context = context + ultra_context
             answers_best = answers_best + ultra_answers_best
             answers_worst = answers_worst + ultra_answers_worst
         if "dolly" in data:
-            dolly_questions, dolly_context, dolly_answers_best, dolly_answers_worst = read_dolly_lang_alignment_dpo(
+            dolly_questions, dolly_context, dolly_answers_best, dolly_answers_worst = read_dolly_lang_alignment(
                 "data/dolly-fi/dolly-fi-eval.jsonl")
             questions = questions + dolly_questions
             context = context + dolly_context

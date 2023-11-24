@@ -82,7 +82,7 @@ def train_dpo(args):
         save_strategy="epoch",
         save_total_limit=1,
         per_device_train_batch_size=1,
-        gradient_accumulation_steps=4,
+        gradient_accumulation_steps=1,
         log_on_each_node=False,
         logging_strategy="steps",
         logging_steps=10,
@@ -92,6 +92,9 @@ def train_dpo(args):
         optim="rmsprop",
         # warmup_steps=100,
         bf16=True,
+        gradient_checkpointing=True,
+        half_precision_backend="cuda_amp",
+        local_rank=args.local_rank,
     )
 
     # TOKENIZER
@@ -103,9 +106,11 @@ def train_dpo(args):
     print("base model:", args.model)
     print("=== Loading model ===")
     model = load_model(args.model, args.transformers_cache, args.use_lora)
+    print("model device:", model.device)
 
-    print("=== Loading model_ref ===")
-    model_ref = load_model(args.model, args.transformers_cache, args.use_lora)
+    # print("=== Loading model_ref ===")
+    # model_ref = load_model(args.model, args.transformers_cache, args.use_lora)
+    # print("model_ref device:", model_ref.device)
     # create_reference_model error: DeepSpeed ZeRO-3 is enabled and is not compatible with `create_reference_model()
     # model_ref = create_reference_model(model, num_shared_layers=6)
 
@@ -140,7 +145,7 @@ def train_dpo(args):
     # 5. initialize the DPO trainer
     dpo_trainer = DPOTrainer(
         model=model,
-        ref_model=model_ref,
+        ref_model=None,
         args=training_args,
         beta=0.1,
         train_dataset=dataset['train'],

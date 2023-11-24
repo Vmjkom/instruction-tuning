@@ -5,14 +5,6 @@ import numpy as np
 from logging import warning
 from datasets import DatasetDict
 from argparse import ArgumentParser
-from peft import (
-    get_peft_config,
-    get_peft_model,
-    get_peft_model_state_dict,
-    LoraConfig,
-    TaskType
-)
-
 from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
@@ -24,6 +16,7 @@ from transformers import (
 
 # custom classes
 from instruction_finetuning_datasets import read_data_sft
+from utils import load_model
 
 import logging
 torch.cuda.empty_cache()
@@ -47,7 +40,6 @@ def argparser():
     ap.add_argument('--output_file', type=str)
     ap.add_argument('--training_data', type=str, default="oasst")
     ap.add_argument('--eval_task', type=str, default="arc_challenge")
-    ap.add_argument('--data_split', type=int, default=1)
     ap.add_argument('--lang', type=str, default="fi")
     ap.add_argument('--local_rank', type=int)
     ap.add_argument('--use_lora', default=True, type=lambda x: (str(x).lower() == 'true'))
@@ -57,30 +49,6 @@ def argparser():
     ap.add_argument('--prompt_structure', default=False, type=lambda x: (str(x).lower() == 'true'))
     return ap
 
-def load_model(model_name, transformers_cache, use_lora=False, ignore_bias_buffers=False):
-    print("load_model")
-    model = AutoModelForCausalLM.from_pretrained(
-        model_name,
-        cache_dir=transformers_cache,
-        num_labels=1,
-        torch_dtype=torch.bfloat16
-    )
-    # print(model)
-    if ignore_bias_buffers:
-        # torch distributed hack
-        model._ddp_params_and_buffers_to_ignore = [
-            name for name, buffer in model.named_buffers() if buffer.dtype == torch.bool
-        ]
-    if use_lora is True:
-        print("Using lora")
-        model.enable_input_require_grads()
-        peft_config = LoraConfig(task_type=TaskType.CAUSAL_LM, inference_mode=False, r=8, lora_alpha=32,
-                                     lora_dropout=0.1,
-                                     target_modules=['query_key_value'])  # Parameter values from Sampo's script
-        model = get_peft_model(model, peft_config)
-        model.print_trainable_parameters()
-        print("Loaded lora model")
-    return model
 
 def logits_argmax(logits):
     # https://github.com/huggingface/transformers/issues/15466
@@ -126,11 +94,11 @@ def filter_by_length(datasetdict, max_length):
             datasetdict[k] = filtered
     return datasetdict
 
-def preprocess_sft(data, tokenizer):   # Sampo's script -- modified with prompt structure
+def preprocess_sft(data, tokenizer):   # Sampo's script 
     prompts = data['prompt']
     contexts = data['context']
     responses = data['response']
-    end_of_prompt = tokenizer.pad_token # tokenizer.sep_token
+    end_of_prompt = tokenizer.pad_token 
     end_of_text = tokenizer.eos_token
     combined = []
     for prompt, context, response in zip(prompts, contexts, responses):
@@ -158,7 +126,6 @@ def train_sft(args):
             output_dir = os.path.join("../../models/sft_checkpoints/", base_model_name + 
                                 "-chatml" +
                                 "-" + args.eval_task + 
-                                "-" + str(args.data_split) +
                                 "-" + str(args.num_train_epochs) + "epochs")
         else:
             output_dir = os.path.join("../../models/sft_checkpoints/", base_model_name + 
@@ -170,7 +137,6 @@ def train_sft(args):
         if args.training_data == "eval_tasks":
             output_dir = os.path.join("../../models/sft_checkpoints/", base_model_name + 
                                       "-" + args.eval_task + 
-                                      "-" + str(args.data_split) +
                                       "-" + str(args.num_train_epochs) + "epochs")
         else:
             output_dir = os.path.join("../../models/sft_checkpoints/", base_model_name + 

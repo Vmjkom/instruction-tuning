@@ -17,7 +17,7 @@ from trl import (
 )
 
 # custom classes
-from utils import load_model
+from utils import load_model, get_peft_config
 from dpo_finetuning_datasets import read_data_dpo
 
 model_max_length = 2048
@@ -34,10 +34,11 @@ def argparser():
     ap.add_argument('--gradient_accumulation_steps', type=int, default=4)
     ap.add_argument('--output_file', type=str)
     ap.add_argument('--training_data', type=str, default="oasst")
-    ap.add_argument('--max_examples', type=int, default=1000)
     ap.add_argument('--lang', type=str, default="en")
     ap.add_argument('--local_rank', type=int)
     ap.add_argument('--use_lora', default=True, type=lambda x: (str(x).lower() == 'true'))
+    ap.add_argument('--lora_r', type=int, default=16)
+    ap.add_argument('--max_examples', type=int, default=None)
     ap.add_argument('--transformers_cache',type=str, default="/scratch/project_462000319/transformers_cache")
     ap.add_argument('--dropout',type=float, default=0.1)
     return ap
@@ -76,23 +77,25 @@ def train_dpo(args):
         remove_unused_columns=False,
         output_dir=output_dir,
         logging_dir=log_dir,
-        evaluation_strategy="no",
-        # eval_steps=100,
+        evaluation_strategy="steps",
+        eval_steps=100,
         num_train_epochs=args.num_train_epochs,
-        save_strategy="epoch",
-        save_total_limit=1,
+        save_strategy="steps",
+        save_steps=100,
+        save_total_limit=5,
         per_device_train_batch_size=1,
-        gradient_accumulation_steps=1,
+        gradient_accumulation_steps=4,
         log_on_each_node=False,
         logging_strategy="steps",
         logging_steps=10,
         logging_first_step=True,
         report_to='tensorboard',
-        # learning_rate=args.learning_rate,
+        learning_rate=args.learning_rate,
         optim="rmsprop",
-        # warmup_steps=100,
+        warmup_ratio=0.1,
         bf16=True,
         gradient_checkpointing=True,
+        gradient_checkpointing_kwargs={"use_reentrant": False},
         half_precision_backend="cuda_amp",
         local_rank=args.local_rank,
     )
@@ -105,8 +108,7 @@ def train_dpo(args):
     # 1. load a pretrained model
     print("base model:", args.model)
     print("=== Loading model ===")
-    model = load_model(args.model, args.transformers_cache, args.use_lora)
-    print("model device:", model.device)
+    model = load_model(args.model, args.transformers_cache, use_lora=False, lora_r=args.lora_r)
 
     # print("=== Loading model_ref ===")
     # model_ref = load_model(args.model, args.transformers_cache, args.use_lora)
@@ -152,10 +154,10 @@ def train_dpo(args):
         eval_dataset=dataset['validation'],
         tokenizer=tokenizer,
         max_length=model_max_length,
-        max_target_length=128,
-        max_prompt_length=128,
-        padding_value=tokenizer.pad_token_id
-        # generate_during_eval=True,
+        max_target_length=256,
+        max_prompt_length=256,
+        padding_value=tokenizer.pad_token_id,
+        peft_config=get_peft_config(args),
     )
 
     # 6. train

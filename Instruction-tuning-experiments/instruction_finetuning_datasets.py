@@ -89,7 +89,7 @@ def read_dolly(path, lang="fi", chatml_format=False):
         if chatml_format:
             prompt = chatml_start_token + "user\n" + result[instruction_col] + chatml_end_token
         else:
-            prompt = user_token + result[instruction_col]
+            prompt = user_token + " " + result[instruction_col]
         if result[context_col] and not result[context_col].isspace():
             context.append(result[context_col])
         else:
@@ -99,12 +99,12 @@ def read_dolly(path, lang="fi", chatml_format=False):
         if chatml_format:
             answer = chatml_start_token + "assistant\n" + result[response_col] + chatml_end_token
         else:
-            answer = assistant_token + result[response_col]
+            answer = assistant_token + " " + result[response_col]
         answers.append(answer)
     return questions, context, answers
 
 
-def read_eval_tasks(task="arc_challenge", split="train", chatml_format=False):
+def read_eval_tasks(task="arc_challenge", split="train"):
     parent_path = "/scratch/project_462000319/jburdge/data/eval_datasets"
     eval_task_datasets = {
         "arc_challenge": {
@@ -127,15 +127,14 @@ def read_eval_tasks(task="arc_challenge", split="train", chatml_format=False):
     questions = []
     answers = []
     contexts = []
+    # tasks = ["arc_challenge", "gsm8k"]
     data_path = Path(os.path.join(parent_path, eval_task_datasets[task][split]))
     results = [json.loads(line) for line in open(data_path)]
     for result in results:
         if task != "hellaswag":
             result = re.split("Question:|Answer:", result['text'])
-            answer = assistant_token + result[-1].strip()
-            question = user_token + result[-2].strip()
-            # print("Question:", question)
-            # print("Answer:", answer)
+            answer =  result[-1].strip()
+            question = result[-2].strip()
             if answer and question:
                 questions.append(question)
                 answers.append(answer)
@@ -143,8 +142,8 @@ def read_eval_tasks(task="arc_challenge", split="train", chatml_format=False):
                 contexts.append('')
         else:
             result = result['text'].split(".")
-            question = user_token + result[0]+"."
-            answer = assistant_token + result[1]+"."
+            question = result[0]+"."
+            answer = result[1]+"."
             if len(question) > 1 and len(answer) > 1:
                 questions.append(question)
                 answers.append(answer)
@@ -152,32 +151,28 @@ def read_eval_tasks(task="arc_challenge", split="train", chatml_format=False):
                 contexts.append('')
     return questions, contexts, answers
 
-
-def read_hh(path, chatml_format=False):
+def read_lima(path, chatml_format=False):
     questions = []
     contexts = []
     answers = []
-    hh_data = [json.loads(line) for line in open(path)]
-    for entry in hh_data:
-        chosen = entry['chosen']
-        chosen = chosen.replace("\n\nHuman:", "\n"+user_token).strip()
-        chosen = chosen.replace("\n\nAssistant:", "\n"+assistant_token).strip()
-        question = chosen[:chosen.rindex(assistant_token)].strip()
-        answer = chosen[chosen.rindex(assistant_token):].strip()
+    data = [json.loads(line) for line in open(path)]
+    for entry in data:
+        question = user_token + " " + entry['question'].strip()
+        answer = assistant_token + " " + entry['answer'].strip()
         questions.append(question)
         answers.append(answer)
         contexts.append('')
     return questions, contexts, answers
-                
 
-def read_data_sft(data="dolly", split="train", lang="fi", chatml_format=False, eval_task="arc_challenge"):
+
+def read_data_sft(data="dolly", split="train", lang="fi", chatml_format=False, shuffle_data=True):
     questions = []
     context = []
     answers = []
     if "train" in split:
         if "dolly" in data:
             if "lang" == "both":
-                languages = ["fi", "en"]
+                languages = ["en", "fi"]
             else:
                 languages = [lang]
             for la in languages:
@@ -190,21 +185,16 @@ def read_data_sft(data="dolly", split="train", lang="fi", chatml_format=False, e
             print("Size of dolly training data", len(questions))
 
         if "instruct_qa" in data:
-            if "lang" == "both":
-                languages = ["fi", "en"]
-            else:
-                languages = [lang]
-            for la in languages:
-                instruct_questions, instruct_context, instruct_answers = read_dolly("data/instruct_qa/instruct_qa_fi_train.jsonl",
-                                                                                        lang=la,
+            instruct_questions, instruct_context, instruct_answers = read_dolly("data/instruct_qa/instruct_qa_fi_train.jsonl",
+                                                                                        lang=lang,
                                                                                         chatml_format=chatml_format)
-                questions = questions + instruct_questions
-                context = context + instruct_context
-                answers = answers + instruct_answers
+            questions = questions + instruct_questions
+            context = context + instruct_context
+            answers = answers + instruct_answers
             print("Size of instruct_qa training data", len(questions))
         if "oasst" in data:
             if "lang" == "both":
-                languages = ["fi", "en"]
+                languages = ["en", "fi"]
             else:
                 languages = [lang]
             for la in languages:
@@ -216,12 +206,12 @@ def read_data_sft(data="dolly", split="train", lang="fi", chatml_format=False, e
                 answers = answers + oasst_answers
             print("Size of oasst training data", len(questions))
         if "eval_tasks" in data:
-            eval_questions, eval_context, eval_answers = read_eval_tasks(task=eval_task, 
-                                                                             split=split, 
-                                                                             chatml_format=chatml_format)
-            questions = questions + eval_questions
-            context = context + eval_context
-            answers = answers + eval_answers
+            tasks = ["arc_challenge", "arc_challenge", "arc_challenge", "arc_challenge", "gsm8k"]
+            for task in tasks:
+                eval_questions, eval_context, eval_answers = read_eval_tasks(task=task, split=split)
+                questions = questions + eval_questions
+                context = context + eval_context
+                answers = answers + eval_answers
             print("Size of eval_tasks training data", len(questions))
         if "hh" in data:
             parent_path = "/scratch/project_462000319/finetuning_data/hh_rlhf"
@@ -231,10 +221,18 @@ def read_data_sft(data="dolly", split="train", lang="fi", chatml_format=False, e
             context = context + hh_context
             answers = answers + hh_answers
             print("Size of HH training data", len(questions))
+        if "lima" in data:
+            parent_path = "/scratch/project_462000319/finetuning_data/hh_rlhf"
+            lima_questions, lima_context, lima_answers = read_lima(os.path.join(parent_path, "fin_lima_translated-enhanced-trimmed.jsonl"),
+                                                               chatml_format=chatml_format)
+            questions = questions + lima_questions
+            context = context + lima_context
+            answers = answers + lima_answers
+            print("Size of LIMA training data", len(questions))
     elif "valid" in split:
         if "dolly" in data:
             if "lang" == "both":
-                languages = ["fi", "en"]
+                languages = ["en", "fi"]
             else:
                 languages = [lang]
             for la in languages:
@@ -245,20 +243,15 @@ def read_data_sft(data="dolly", split="train", lang="fi", chatml_format=False, e
                 context = context + dolly_context
                 answers = answers + dolly_answers
         if "instruct_qa" in data:
-            if "lang" == "both":
-                languages = ["fi", "en"]
-            else:
-                languages = [lang]
-            for la in languages:
-                instruct_questions, instruct_context, instruct_answers = read_dolly("data/instruct_qa/instruct_qa_fi_valid.jsonl",
-                                                                                        lang=la,
+            instruct_questions, instruct_context, instruct_answers = read_dolly("data/instruct_qa/instruct_qa_fi_valid.jsonl",
+                                                                                        lang=lang,
                                                                                         chatml_format=chatml_format)
-                questions = questions + instruct_questions
-                context = context + instruct_context
-                answers = answers + instruct_answers
+            questions = questions + instruct_questions
+            context = context + instruct_context
+            answers = answers + instruct_answers
         if "oasst" in data:
             if "lang" == "both":
-                languages = ["fi", "en"]
+                languages = ["en", "fi"]
             else:
                 languages = [lang]
             for la in languages:
@@ -269,12 +262,12 @@ def read_data_sft(data="dolly", split="train", lang="fi", chatml_format=False, e
                 context = context + oasst_context
                 answers = answers + oasst_answers
         if "eval_tasks" in data:
-            eval_questions, eval_context, eval_answers = read_eval_tasks(task=eval_task,
-                                                                             split=split, 
-                                                                             chatml_format=chatml_format)
-            questions = questions + eval_questions
-            context = context + eval_context
-            answers = answers + eval_answers
+            tasks = ["arc_challenge", "arc_challenge", "arc_challenge", "arc_challenge", "gsm8k"]
+            for task in tasks:
+                eval_questions, eval_context, eval_answers = read_eval_tasks(task=task, split=split)
+                questions = questions + eval_questions
+                context = context + eval_context
+                answers = answers + eval_answers
         if "hh" in data:
             parent_path = "/scratch/project_462000319/finetuning_data/hh_rlhf"
             hh_questions, hh_context, hh_answers = read_hh(os.path.join(parent_path, "hh_rlhf-valid.jsonl"),
@@ -286,7 +279,7 @@ def read_data_sft(data="dolly", split="train", lang="fi", chatml_format=False, e
     elif "eval" in split:
         if "dolly" in data:
             if "lang" == "both":
-                languages = ["fi", "en"]
+                languages = ["en", "fi"]
             else:
                 languages = [lang]
             for la in languages:
@@ -297,21 +290,15 @@ def read_data_sft(data="dolly", split="train", lang="fi", chatml_format=False, e
                 context = context + dolly_context
                 answers = answers + dolly_answers
         if "instruct_qa" in data:
-            if "lang" == "both":
-                languages = ["fi", "en"]
-            else:
-                languages = [lang]
-            for la in languages:
-                instruct_questions, instruct_context, instruct_answers = read_dolly(
-                "data/instruct_qa/instruct_qa_fi_eval.jsonl",
-                lang=la,
-                chatml_format=chatml_format)
-                questions = questions + instruct_questions
-                context = context + instruct_context
-                answers = answers + instruct_answers
+            instruct_questions, instruct_context, instruct_answers = read_dolly("data/instruct_qa/instruct_qa_fi_eval.jsonl",
+                                                                                lang=lang,
+                                                                                chatml_format=chatml_format)
+            questions = questions + instruct_questions
+            context = context + instruct_context
+            answers = answers + instruct_answers
         if "oasst" in data:
             if "lang" == "both":
-                languages = ["fi", "en"]
+                languages = ["en", "fi"]
             else:
                 languages = [lang]
             for la in languages:
@@ -322,12 +309,12 @@ def read_data_sft(data="dolly", split="train", lang="fi", chatml_format=False, e
                 context = context + oasst_context
                 answers = answers + oasst_answers
         if "eval_tasks" in data:
-            eval_questions, eval_context, eval_answers = read_eval_tasks(task=eval_task,
-                                                                             split="valid", 
-                                                                             chatml_format=chatml_format)
-            questions = questions + eval_questions
-            context = context + eval_context
-            answers = answers + eval_answers
+            tasks = ["arc_challenge", "arc_challenge", "arc_challenge", "arc_challenge",  "gsm8k"]
+            for task in tasks:
+                eval_questions, eval_context, eval_answers = read_eval_tasks(task=task, split="valid")
+                questions = questions + eval_questions
+                context = context + eval_context
+                answers = answers + eval_answers
         if "hh" in data:
             parent_path = "/scratch/project_462000319/finetuning_data/hh_rlhf"
             hh_questions, hh_context, hh_answers = read_hh(os.path.join(parent_path, "hh_rlhf-test.jsonl"),
@@ -336,13 +323,17 @@ def read_data_sft(data="dolly", split="train", lang="fi", chatml_format=False, e
             context = context + hh_context
             answers = answers + hh_answers
             print("Size of HH training data", len(questions))
+    # questions = questions[:100]
+    # context = context[:100]
+    # answers = answers[:100]
     data = {
         'prompt': questions,
         'context': context,
         'response': answers,
     }
     data = Dataset.from_dict(data)
-    # data = data.shuffle(seed=42)
+    if shuffle_data:
+        data = data.shuffle(seed=42)
     return data
 
 

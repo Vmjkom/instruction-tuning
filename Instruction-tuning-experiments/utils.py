@@ -31,9 +31,9 @@ def load_model(model_name, transformers_cache, use_lora=False, ignore_bias_buffe
     print("load_model")
     model = AutoModelForCausalLM.from_pretrained(
         model_name,
-        cache_dir=transformers_cache,
         num_labels=1,
         torch_dtype=torch.bfloat16,
+        **kwargs
     )
 
     if ignore_bias_buffers:

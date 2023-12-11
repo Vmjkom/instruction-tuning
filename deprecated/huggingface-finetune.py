@@ -47,6 +47,7 @@ def argparser():
     ap.add_argument('--transformers_cache',type=str, default="/scratch/project_462000319/transformers_cache")
     ap.add_argument('--dropout',type=float, default=0.1)
     ap.add_argument('--prompt_structure', default=False, type=lambda x: (str(x).lower() == 'true'))
+    ap.add_argument('--save_directory',type=str)
     return ap
 
 
@@ -67,17 +68,17 @@ class PromptMaskingDataCollator(DataCollatorForLanguageModeling):    # Sampo's s
         # print("assistant_id:", assistant_id)
         for i in range(len(data['labels'])):
             assistant_indices = np.where(data['labels'][i] == assistant_id)[0]
-            # print("labels:", data['labels'][i])
-            # print("decoded:", self.tokenizer.decode(data['input_ids'][i]))
-            # print("assistant_indices:", assistant_indices)
-            # print("last assistant index:", assistant_indices[-1])
+            print("labels:", data['labels'][i])
+            print("decoded:", self.tokenizer.decode(data['input_ids'][i]))
+            print("assistant_indices:", assistant_indices)
+            print("last assistant index:", assistant_indices[-1])
             if len(assistant_indices) > 0:
                 data['labels'][i, :assistant_indices[-1]] = -100
             else:
                 warning('missing assistant_token in labels')
-            # print("labels:", data['labels'][i])
-            # print("decoded labels:", self.tokenizer.decode(data['labels'][i][assistant_indices[-1]:]))
-            # print("-"*100)
+            print("labels:", data['labels'][i])
+            print("decoded labels:", self.tokenizer.decode(data['labels'][i][assistant_indices[-1]:]))
+            print("-"*100)
         return data
 
 def filter_by_length(datasetdict, max_length):
@@ -123,23 +124,23 @@ def train_sft(args):
     base_model_name = os.path.basename(args.model)
     if args.chatml_format:
         if args.training_data == "eval_tasks":
-            output_dir = os.path.join("../../models/sft_checkpoints/", base_model_name + 
+            output_dir = os.path.join(args.save_directory, base_model_name + 
                                 "-chatml" +
                                 "-" + args.eval_task + 
                                 "-" + str(args.num_train_epochs) + "epochs")
         else:
-            output_dir = os.path.join("../../models/sft_checkpoints/", base_model_name + 
+            output_dir = os.path.join(args.save_directory, base_model_name + 
                                     "-chatml" +
                                     "-" + args.training_data + 
                                     "-" + args.lang +
                                     "-" + str(args.num_train_epochs) + "epochs")
     else:
         if args.training_data == "eval_tasks":
-            output_dir = os.path.join("../../models/sft_checkpoints/", base_model_name + 
+            output_dir = os.path.join(args.save_directory, base_model_name + 
                                       "-" + args.eval_task + 
                                       "-" + str(args.num_train_epochs) + "epochs")
         else:
-            output_dir = os.path.join("../../models/sft_checkpoints/", base_model_name + 
+            output_dir = os.path.join(args.save_directory, base_model_name + 
                                       "-" + args.training_data + 
                                       "-" + args.lang +
                                       "-" + str(args.num_train_epochs) + "epochs")
@@ -243,7 +244,7 @@ def train_sft(args):
 
     trainer.train()
     base_model_name = os.path.basename(args.model)
-    save_directory = os.path.join("../../models/sft_finetuned/", base_model_name + "-" + args.training_data + "-" + args.lang)
+    save_directory = os.path.join(args.save_directory, base_model_name + "-" + args.training_data + "-" + args.lang)
     if args.use_lora:
         trainer.model.save_pretrained(save_directory + "-lora")
     else:

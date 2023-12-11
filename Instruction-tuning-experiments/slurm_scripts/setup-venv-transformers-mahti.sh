@@ -16,7 +16,7 @@
 
 # Load modules
 # module load cray-python
-# module load LUMI/22.08 partition/G rocm/5.3.3
+# module load LUMI/22.08 partition/G rocm5.4.2
 
 #module use /pfs/lustrep2/projappl/project_462000125/samantao-public/mymodules
 #module load aws-ofi-rccl/rocm-5.2.3

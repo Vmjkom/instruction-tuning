@@ -1,0 +1,9 @@
+name: inst_tune
+channels:
+  - conda-forge
+dependencies:
+  - pip
+  - setuptools
+  - wheel
+  - pip:
+    - -r requirements.txt

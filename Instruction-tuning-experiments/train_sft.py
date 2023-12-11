@@ -20,29 +20,24 @@ from trl import (
 from utils import load_model, logits_argmax
 from instruction_finetuning_datasets import read_data_sft
 
-model_max_length = 2048
 user_token = "<|user|>"
 assistant_token = "<|assistant|>"
 
 def argparser():
     ap = ArgumentParser()
     ap.add_argument('--deepspeed_config', type=str, default="./ds-configs/oa_zero3_config_sft.json")
-    ap.add_argument('--learning_rate', type=float, default=2e-5)
     ap.add_argument('--model', type=str)
-    ap.add_argument('--tokenizer', type=str)
-    ap.add_argument('--task', type=str, default="sft")
     ap.add_argument('--num_train_epochs', type=int, default=1)
     ap.add_argument('--per_device_batch_size', type=int, default=1)
     ap.add_argument('--output_dir', type=str, default="output")
-    ap.add_argument('--gradient_accumulation_steps', type=int, default=4)
     ap.add_argument('--output_file', type=str)
     ap.add_argument('--training_data', type=str, default="oasst")
     ap.add_argument('--lang', type=str, default="fi")
     ap.add_argument('--local_rank', type=int)
-    ap.add_argument('--use_lora', default=True, type=lambda x: (str(x).lower() == 'true'))
-    ap.add_argument('--transformers_cache',type=str, default="/scratch/project_2007628/transformers_cache")
-    ap.add_argument('--dropout',type=float, default=0.1)
+    ap.add_argument('--use_peft', default=False, action='store_true')
+    ap.add_argument('--transformers_cache',type=str, default="/scratch/project_462000319/transformers_cache")
     ap.add_argument('--prompt_structure', default=False, type=lambda x: (str(x).lower() == 'true'))
+    ap.add_argument('--save_directory',type=str)
     return ap
 
 def filter_by_length(datasetdict, max_length):
@@ -73,7 +68,7 @@ def formatting_prompts_func(example):
 def train_sft(args):
     log_dir = './logs/'
     base_model_name = os.path.basename(args.model)
-    output_dir = os.path.join("../models/sft_checkpoints/", base_model_name +
+    output_dir = os.path.join(args.save_directory, base_model_name +
                               "-" + args.training_data +
                               "-" + args.lang +
                               "-" + str(args.num_train_epochs) + "epochs")
@@ -96,7 +91,6 @@ def train_sft(args):
         save_strategy="epoch",
         save_steps=100,
         save_total_limit=1,
-        disable_tqdm=False,
         weight_decay=0.01,
         logging_dir=log_dir,
         optim='adamw_hf',
@@ -105,14 +99,13 @@ def train_sft(args):
         gradient_checkpointing=True,
         report_to='tensorboard',
         bf16=True,
-        half_precision_backend="cuda_amp",
         local_rank=args.local_rank,
     )
 
     # TOKENIZER
     print("===== Loading tokenizer =====")
     print("tokenizer :", args.tokenizer)
-    tokenizer = AutoTokenizer.from_pretrained(args.tokenizer)
+    tokenizer = AutoTokenizer.from_pretrained(args.model)
     print("===== Loaded tokenizer =====")
 
     # MODEL
@@ -158,6 +151,9 @@ def train_sft(args):
         data_collator=collator,
         tokenizer=tokenizer,
         formatting_func=formatting_prompts_func,
+        max_length=4028,
+        gradient_checkpointing=True,
+        gradient_accumulation_steps=2
         #preprocess_logits_for_metrics=logits_argmax,
     )
 

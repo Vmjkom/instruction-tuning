@@ -24,7 +24,7 @@ model_max_length = 2048
 
 def argparser():
     ap = ArgumentParser()
-    ap.add_argument('--deepspeed_config', type=str, default="./ds-configs/oa_deepspeed_rl_zero3.json")
+    ap.add_argument('--deepspeed_config', type=str, default="./ds-configs/oa_deepspeed_rl_zero3_warmuplr.json")
     ap.add_argument('--learning_rate', type=float, default=2e-5)
     ap.add_argument('--model', type=str)
     ap.add_argument('--tokenizer', type=str)
@@ -73,12 +73,12 @@ def train_dpo(args):
     # This needs to be defined before model loading for deepspeed stage 3 to work correctly
     # initialize training arguments
     training_args = TrainingArguments(
-        deepspeed="./ds-configs/oa_deepspeed_rl_zero3_warmuplr.json",
+        deepspeed=args.deepspeed_config,
         remove_unused_columns=False,
         output_dir=output_dir,
         logging_dir=log_dir,
         evaluation_strategy="steps",
-        eval_steps=100,
+        eval_steps=300,
         num_train_epochs=args.num_train_epochs,
         save_strategy="steps",
         save_steps=100,
@@ -165,10 +165,7 @@ def train_dpo(args):
 
     base_model_name = os.path.basename(args.model)
     save_directory = os.path.join("../../models/dpo_finetuned/", base_model_name + "-" + args.training_data + "-" + args.lang)
-    if args.use_lora:
-        dpo_trainer.model.save_pretrained(save_directory + "-lora")
-    else:
-        dpo_trainer.save_model(save_directory)
+    dpo_trainer.save_model(save_directory)
     eval_results = dpo_trainer.evaluate(dataset['evaluation'])
 
     print('Training data', args.training_data)

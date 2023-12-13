@@ -213,17 +213,9 @@ def read_data_sft(data="dolly", split="train", lang="fi", chatml_format=False, s
                 context = context + eval_context
                 answers = answers + eval_answers
             print("Size of eval_tasks training data", len(questions))
-        if "hh" in data:
-            parent_path = "/scratch/project_462000319/finetuning_data/hh_rlhf"
-            hh_questions, hh_context, hh_answers = read_hh(os.path.join(parent_path, "hh_rlhf-train.jsonl"),
-                                                               chatml_format=chatml_format)
-            questions = questions + hh_questions
-            context = context + hh_context
-            answers = answers + hh_answers
-            print("Size of HH training data", len(questions))
         if "lima" in data:
-            parent_path = "/scratch/project_462000319/finetuning_data/hh_rlhf"
-            lima_questions, lima_context, lima_answers = read_lima(os.path.join(parent_path, "fin_lima_translated-enhanced-trimmed.jsonl"),
+            parent_path = "/scratch/project_462000319/finetuning_data/lima"
+            lima_questions, lima_context, lima_answers = read_lima(os.path.join(parent_path, "fin_lima_translated-enhanced-trimmed-train.jsonl"),
                                                                chatml_format=chatml_format)
             questions = questions + lima_questions
             context = context + lima_context
@@ -268,14 +260,13 @@ def read_data_sft(data="dolly", split="train", lang="fi", chatml_format=False, s
                 questions = questions + eval_questions
                 context = context + eval_context
                 answers = answers + eval_answers
-        if "hh" in data:
-            parent_path = "/scratch/project_462000319/finetuning_data/hh_rlhf"
-            hh_questions, hh_context, hh_answers = read_hh(os.path.join(parent_path, "hh_rlhf-valid.jsonl"),
+        if "lima" in data:
+            parent_path = "/scratch/project_462000319/finetuning_data/lima"
+            lima_questions, lima_context, lima_answers = read_lima(os.path.join(parent_path, "fin_lima_translated-enhanced-trimmed-valid.jsonl"),
                                                                chatml_format=chatml_format)
-            questions = questions + hh_questions
-            context = context + hh_context
-            answers = answers + hh_answers
-            print("Size of HH training data", len(questions))
+            questions = questions + lima_questions
+            context = context + lima_context
+            answers = answers + lima_answers
     elif "eval" in split:
         if "dolly" in data:
             if "lang" == "both":
@@ -315,17 +306,14 @@ def read_data_sft(data="dolly", split="train", lang="fi", chatml_format=False, s
                 questions = questions + eval_questions
                 context = context + eval_context
                 answers = answers + eval_answers
-        if "hh" in data:
-            parent_path = "/scratch/project_462000319/finetuning_data/hh_rlhf"
-            hh_questions, hh_context, hh_answers = read_hh(os.path.join(parent_path, "hh_rlhf-test.jsonl"),
+        if "lima" in data:
+            parent_path = "/scratch/project_462000319/finetuning_data/lima"
+            lima_questions, lima_context, lima_answers = read_lima(os.path.join(parent_path, "fin_lima_translated-enhanced-trimmed-valid.jsonl"),
                                                                chatml_format=chatml_format)
-            questions = questions + hh_questions
-            context = context + hh_context
-            answers = answers + hh_answers
-            print("Size of HH training data", len(questions))
-    # questions = questions[:100]
-    # context = context[:100]
-    # answers = answers[:100]
+            questions = questions + lima_questions
+            context = context + lima_context
+            answers = answers + lima_answers
+
     data = {
         'prompt': questions,
         'context': context,

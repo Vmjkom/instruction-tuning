@@ -3,7 +3,7 @@ import os
 import torch
 import numpy as np
 from logging import warning
-from datasets import DatasetDict
+from datasets import DatasetDict, interleave_datasets
 from argparse import ArgumentParser
 from transformers import (
     AutoModelForCausalLM,
@@ -39,10 +39,10 @@ def argparser():
     ap.add_argument('--gradient_accumulation_steps', type=int, default=4)
     ap.add_argument('--output_file', type=str)
     ap.add_argument('--training_data', type=str, default="oasst")
-    ap.add_argument('--eval_task', type=str, default="arc_challenge")
     ap.add_argument('--lang', type=str, default="fi")
     ap.add_argument('--local_rank', type=int)
     ap.add_argument('--use_lora', default=True, type=lambda x: (str(x).lower() == 'true'))
+    ap.add_argument('--lora_r', type=int, default=16)
     ap.add_argument('--chatml_format', default=False, type=lambda x: (str(x).lower() == 'true'))
     ap.add_argument('--transformers_cache',type=str, default="/scratch/project_462000319/transformers_cache")
     ap.add_argument('--dropout',type=float, default=0.1)
@@ -67,7 +67,7 @@ class PromptMaskingDataCollator(DataCollatorForLanguageModeling):    # Sampo's s
         # print("assistant_id:", assistant_id)
         for i in range(len(data['labels'])):
             assistant_indices = np.where(data['labels'][i] == assistant_id)[0]
-            # print("labels:", data['labels'][i])
+            # print("original labels:", data['labels'][i])
             # print("decoded:", self.tokenizer.decode(data['input_ids'][i]))
             # print("assistant_indices:", assistant_indices)
             # print("last assistant index:", assistant_indices[-1])
@@ -75,8 +75,28 @@ class PromptMaskingDataCollator(DataCollatorForLanguageModeling):    # Sampo's s
                 data['labels'][i, :assistant_indices[-1]] = -100
             else:
                 warning('missing assistant_token in labels')
-            # print("labels:", data['labels'][i])
+            # print("masked labels:", data['labels'][i])
             # print("decoded labels:", self.tokenizer.decode(data['labels'][i][assistant_indices[-1]:]))
+            # print("-"*100)
+        return data
+
+class EvalTasksDataCollator(DataCollatorForLanguageModeling):    
+    def __call__(self, features, return_tensors=None):
+        data = super().__call__(features, return_tensors)
+        # for finetuning on eval tasks, use pad_token to signal boundary between question and answer 
+        # print("assistant_id:", assistant_id)
+        mask_token_id = -100 #self.tokenizer.pad_token_id
+        for i in range(len(data['labels'])):
+            pad_indices = np.where(data['labels'][i] == mask_token_id)[0]
+            # print("labels:", data['labels'][i])
+            # print("decoded:", self.tokenizer.decode(data['input_ids'][i]))
+            # print("pad_indices:", pad_indices)
+            if len(pad_indices) > 0:
+                data['labels'][i, :pad_indices[0]] = -100
+            else:
+                warning('missing pad_token in labels')
+            # print("labels:", data['labels'][i])
+            # print("decoded labels:", self.tokenizer.decode(data['labels'][i][(pad_indices[0]+1):]))
             # print("-"*100)
         return data
 
@@ -94,7 +114,7 @@ def filter_by_length(datasetdict, max_length):
             datasetdict[k] = filtered
     return datasetdict
 
-def preprocess_sft(data, tokenizer):   # Sampo's script 
+def preprocess_sft(data, tokenizer, model_args): 
     prompts = data['prompt']
     contexts = data['context']
     responses = data['response']
@@ -107,7 +127,9 @@ def preprocess_sft(data, tokenizer):   # Sampo's script
         else:
             input_i = context + '\n' + prompt
         # FinGPT needs end_of_prompt to signal prompt boundary, Poro uses assistant_token or chatml_start_token
-        if (assistant_token in tokenizer.additional_special_tokens) or (chatml_start_token in tokenizer.additional_special_tokens):
+        if "eval_tasks" in model_args.training_data:
+            combined_line = input_i + tokenizer.pad_token + response + end_of_text
+        elif (assistant_token in tokenizer.additional_special_tokens) or (chatml_start_token in tokenizer.additional_special_tokens):
             combined_line = input_i + '\n' + response + end_of_text
         else:
             combined_line = input_i + end_of_prompt + '\n' + response + end_of_text
@@ -125,7 +147,7 @@ def train_sft(args):
         if args.training_data == "eval_tasks":
             output_dir = os.path.join("../../models/sft_checkpoints/", base_model_name + 
                                 "-chatml" +
-                                "-" + args.eval_task + 
+                                "-" + args.training_data + 
                                 "-" + str(args.num_train_epochs) + "epochs")
         else:
             output_dir = os.path.join("../../models/sft_checkpoints/", base_model_name + 
@@ -136,7 +158,7 @@ def train_sft(args):
     else:
         if args.training_data == "eval_tasks":
             output_dir = os.path.join("../../models/sft_checkpoints/", base_model_name + 
-                                      "-" + args.eval_task + 
+                                      "-" + args.training_data + 
                                       "-" + str(args.num_train_epochs) + "epochs")
         else:
             output_dir = os.path.join("../../models/sft_checkpoints/", base_model_name + 
@@ -149,8 +171,9 @@ def train_sft(args):
     training_args = TrainingArguments(
         deepspeed=args.deepspeed_config,
         output_dir=output_dir,
-        evaluation_strategy="steps",
-        eval_steps=100,
+        evaluation_strategy="epoch",
+        # eval_steps=100,
+        #lr_scheduler_type="cosine",
         learning_rate=args.learning_rate,
         per_device_train_batch_size=1,
         gradient_accumulation_steps=4,
@@ -160,7 +183,7 @@ def train_sft(args):
         logging_steps=10,
         num_train_epochs=args.num_train_epochs,
         save_strategy="epoch",
-        save_steps=100,
+        # save_steps=100,
         save_total_limit=1,
         disable_tqdm=False,
         weight_decay=0.01,
@@ -169,9 +192,9 @@ def train_sft(args):
         adam_epsilon=1e-8,
         max_grad_norm=1.0,
         gradient_checkpointing=True,
+        gradient_checkpointing_kwargs={"use_reentrant": False},
         report_to='tensorboard',
         bf16=True,
-        #warmup_steps=300,
         warmup_ratio=0.1,
         half_precision_backend="cuda_amp",
         local_rank=args.local_rank,
@@ -188,7 +211,7 @@ def train_sft(args):
     # MODEL
     print("===== Loading model =====")
     print("base model:", args.model)
-    model = load_model(args.model, args.transformers_cache, args.use_lora)
+    model = load_model(args.model, args.transformers_cache, use_lora=args.use_lora, lora_r=args.lora_r)
     print("===== Loaded model =====")
 
     # add special tokens if necessary
@@ -203,9 +226,14 @@ def train_sft(args):
     # resize_token_embeddings(model, len(tokenizer))
 
     print("Loading data for SFT")
-    train_data = read_data_sft(args.training_data, split="train", lang=args.lang, chatml_format=args.chatml_format, eval_task=args.eval_task)
-    val_data = read_data_sft(args.training_data, split="valid", lang=args.lang, chatml_format=args.chatml_format, eval_task=args.eval_task)
-    eval_data = read_data_sft(args.training_data, split="eval", lang=args.lang, chatml_format=args.chatml_format, eval_task=args.eval_task)
+    # if "eval_tasks" in args.training_data:
+    #     train_arc = read_data_sft(args.training_data, split="train", eval_task="arc_challenge")
+    #     train_gsm8k = read_data_sft(args.training_data, split="train", eval_task="gsm8k")
+    #     train_data = interleave_datasets([train_arc, train_gsm8k], probabilities=[0.75, 0.25], stopping_strategy="all_exhausted")
+    # else:
+    train_data = read_data_sft(args.training_data, split="train", lang=args.lang, chatml_format=args.chatml_format)
+    val_data = read_data_sft(args.training_data, split="valid", lang=args.lang, chatml_format=args.chatml_format)
+    eval_data = read_data_sft(args.training_data, split="eval", lang=args.lang, chatml_format=args.chatml_format)
 
     print("Size of training data", len(train_data))
     print("Size of validation data", len(val_data))
@@ -218,16 +246,24 @@ def train_sft(args):
     })
 
     dataset = dataset.map(
-        lambda d: preprocess_sft(d, tokenizer),
+        lambda d: preprocess_sft(d, tokenizer, args),
         batched=True
     )
 
     print("Filtering by length")
     dataset = filter_by_length(dataset, model_max_length)
-    data_collator = PromptMaskingDataCollator(
-        tokenizer=tokenizer,
-        mlm=False
-    )
+
+    print("Get data collator")
+    if "eval_tasks" in args.training_data:
+        data_collator = EvalTasksDataCollator(
+            tokenizer=tokenizer,
+            mlm=False
+        )
+    else:
+        data_collator = PromptMaskingDataCollator(
+            tokenizer=tokenizer,
+            mlm=False
+        )
 
     print("Size of training data", len(dataset['train']))
 
@@ -243,11 +279,16 @@ def train_sft(args):
 
     trainer.train()
     base_model_name = os.path.basename(args.model)
-    save_directory = os.path.join("../../models/sft_finetuned/", base_model_name + "-" + args.training_data + "-" + args.lang)
-    if args.use_lora:
-        trainer.model.save_pretrained(save_directory + "-lora")
+    if "eval_tasks" in args.training_data:
+            save_directory = os.path.join("../../models/sft_finetuned/", base_model_name + 
+                                          "-" + args.training_data + 
+                                          "-" + str(args.num_train_epochs) + "epochs")
     else:
-        trainer.save_model(save_directory)
+        save_directory = os.path.join("../../models/sft_finetuned/", base_model_name + 
+                                      "-" + args.training_data + 
+                                      "-" + args.lang +
+                                      "-" + str(args.num_train_epochs) + "epochs")
+    trainer.save_model(save_directory)
     eval_results = trainer.evaluate(dataset['evaluation'])
 
     print('Training data', args.training_data)

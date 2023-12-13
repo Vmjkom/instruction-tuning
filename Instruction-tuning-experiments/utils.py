@@ -27,7 +27,7 @@ def logits_argmax(logits):
     return logits.argmax(axis=-1)
 
 
-def load_model(model_name, transformers_cache, use_lora=False, ignore_bias_buffers=True):
+def load_model(model_name, transformers_cache, use_lora=False, ignore_bias_buffers=False, lora_r=16):
     print("load_model")
     model = AutoModelForCausalLM.from_pretrained(
         model_name,
@@ -44,14 +44,26 @@ def load_model(model_name, transformers_cache, use_lora=False, ignore_bias_buffe
     if use_lora is True:
         print("Using lora")
         model.enable_input_require_grads()
-        peft_config = LoraConfig(task_type=TaskType.CAUSAL_LM, inference_mode=False, r=8, lora_alpha=32,
-                                     lora_dropout=0.1)
+        peft_config = LoraConfig(task_type=TaskType.CAUSAL_LM, 
+                                 inference_mode=False, 
+                                 r=lora_r, 
+                                 lora_alpha=32,
+                                 lora_dropout=0.1)
         model = get_peft_model(model, peft_config)
-        model.base_model.model.transformer.enable_input_require_grads()
+        # model.base_model.model.transformer.enable_input_require_grads()
         model.print_trainable_parameters()
         print("Loaded lora model")
-    # model.gradient_checkpointing_enable()
     return model
+
+def get_peft_config(model_args):
+    peft_config = LoraConfig(
+        r=model_args.lora_r,
+        lora_alpha=32,
+        lora_dropout=0.1,
+        task_type=TaskType.CAUSAL_LM,
+    )
+
+    return peft_config
 
 def filter_by_length(datasetdict, max_length):
     for k in datasetdict:

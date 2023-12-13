@@ -9,6 +9,8 @@ user_token = "<|user|>"
 assistant_token = "<|assistant|>"
 chatml_start_token = "<|im_start|>"
 chatml_end_token = "<|im_end|>"
+anthropic_user_token = "\n\nHuman:"
+anthropic_asst_token = "\n\nAssistant:"
 
 def read_oasst(path, lang='fi', score_type='toxicity', max_examples=0):
     if lang == 'fi':
@@ -65,19 +67,11 @@ def read_oasst(path, lang='fi', score_type='toxicity', max_examples=0):
             contexts_list.append(answers_dict[key]["context"])
             answers_best_list.append(sorted_answers[-1][0])
             answers_worst_list.append(sorted_answers[0][0])
-            # answers_best_list.append(sorted_answers[0][0])
-            # answers_worst_list.append(sorted_answers[-1][0])
     if max_examples > 0:
         questions_list = questions_list[:max_examples]
         contexts_list = contexts_list[:max_examples]
         answers_best_list = answers_best_list[:max_examples]
         answers_worst_list = answers_worst_list[:max_examples]
-    # for i in range(20):
-    #     print("CONTEXT:", contexts_list[i])
-    #     print("\nQUESTION:", questions_list[i])
-    #     print("\nCHOSEN:", answers_best_list[i])
-    #     print("\nREJECTED:", answers_worst_list[i])
-    #     print("-"*100)
     return questions_list, contexts_list, answers_best_list, answers_worst_list
 
 def read_ultrafeedback(path, max_examples=0):
@@ -112,50 +106,45 @@ def read_ultrafeedback(path, max_examples=0):
         answers_worst_list = answers_worst_list[:max_examples]
     return prompts_list, contexts_list, answers_best_list, answers_worst_list
 
-
-def read_hh(path, single_turn_only=False, max_examples=0):
-    questions_list = []
-    contexts_list = []
-    chosen_list = []
-    rejected_list = []
-    hh_data = [json.loads(line) for line in open(path)]
-    for entry in hh_data:
-        chosen = entry['chosen']
-        rejected = entry['rejected']
-        turn_indices = [m.start() for m in re.finditer("Human:", chosen)]
-        if (single_turn_only is False) or (single_turn_only is True and len(turn_indices) == 1):
-            chosen = chosen.replace("\n\nHuman:", "\n"+user_token).strip()
-            chosen = chosen.replace("\n\nAssistant:", "\n"+assistant_token).strip()
-            # user_token_index = 0
-            # while user_token_index != -1:
-            #     asst_token_index = chosen.find(assistant_token)
-            #     user_token_index = chosen.find()
-            #     prompt = chosen[user_token_index:asst_token_index]
-            #     chosen_answer = chosen[asst_token_index:]
-            #     next_user_token = chosen_answer.find(user_token)
-            #     chosen_answer = chosen_answer[:next_user_token]
-            question = chosen[:chosen.rindex(assistant_token)].strip()
-            answer_chosen = chosen[chosen.rindex(assistant_token):].strip()
-            rejected = entry['rejected']
-            rejected = rejected.replace("\n\nHuman:", "\n"+user_token).strip()
-            rejected = rejected.replace("\n\nAssistant:", "\n"+assistant_token).strip()
-            answer_rejected = rejected[rejected.rindex(assistant_token):].strip()
-            questions_list.append(question)
-            chosen_list.append(answer_chosen)
-            rejected_list.append(answer_rejected)
-            contexts_list.append('')
-    if max_examples > 0:
-        questions_list = questions_list[:max_examples]
-        contexts_list = contexts_list[:max_examples]
-        chosen_list = chosen_list[:max_examples]
-        rejected_list = rejected_list[:max_examples]
-    # for i in range(30):
-    #     print("QUESTION:", questions_list[i])
-    #     print("\nCHOSEN:", chosen_list[i])
-    #     print("\nREJECTED:", rejected_list[i])
-    #     print("-"*100)
-    return questions_list, contexts_list, chosen_list, rejected_list
-
+def read_hh(filepath, max_examples=10000, chatml_format=False):
+    data = [json.loads(line) for line in open(filepath)]
+    data = data[:max_examples]
+    # extract first prompt and response from each entry
+    prompts = []
+    contexts = []
+    chosen_responses = []
+    rejected_responses = []
+    for entry in data:
+        transcript_chosen = entry['chosen']
+        transcript_rejected = entry['rejected']
+        human_index = 0
+        asst_index = 0
+        try:
+            human_index = transcript_chosen.rindex(anthropic_user_token)
+            asst_index = transcript_chosen.rindex(anthropic_asst_token)
+            # context consists of the previous turns
+            context = transcript_chosen[:human_index]
+            # prompt is current user question
+            prompt = transcript_chosen[human_index:asst_index]
+            # get chosen response
+            chosen_response = transcript_chosen[asst_index:]
+            # get rejected response
+            human_index = transcript_rejected.rindex(anthropic_user_token)
+            asst_index = transcript_rejected.rindex(anthropic_asst_token)
+            rejected_response = transcript_rejected[asst_index:]
+            # format everything correctly
+            context = context.replace(anthropic_user_token, "\n"+user_token).strip()
+            context = context.replace(anthropic_asst_token, "\n"+assistant_token).strip()
+            prompt = prompt.replace(anthropic_user_token, user_token).strip()
+            chosen_response = chosen_response.replace(anthropic_asst_token, assistant_token).strip()
+            rejected_response = rejected_response.replace(anthropic_asst_token, assistant_token).strip()
+            contexts.append(context)
+            prompts.append(prompt)
+            chosen_responses.append(chosen_response)
+            rejected_responses.append(rejected_response)
+        except ValueError:
+            print("Human or Assistant tokens not found")                   
+    return prompts, contexts, chosen_responses, rejected_responses
 
 def read_oasst_lang_alignment(path):
     languages = ["fi", "en"]
@@ -301,7 +290,6 @@ def read_data_dpo(data="oasst", split="train", lang="fi", shuffle_data=True, max
             parent_path = "/scratch/project_462000319/finetuning_data/hh_rlhf"
             if "helpful" in data:
                 hh_questions, hh_context, hh_answers_best, hh_answers_worst = read_hh(os.path.join(parent_path, "helpful-base-train.jsonl"),
-                                                                                  single_turn_only=True,
                                                                                   max_examples=max_examples)
             
                 questions = questions + hh_questions
@@ -311,7 +299,6 @@ def read_data_dpo(data="oasst", split="train", lang="fi", shuffle_data=True, max
                 print("Size of hh helpful training data", len(questions))
             if "harmless" in data:
                 hh_questions, hh_context, hh_answers_best, hh_answers_worst = read_hh(os.path.join(parent_path, "harmless-base-train.jsonl"),
-                                                                                  single_turn_only=True,
                                                                                   max_examples=max_examples)
                 questions = questions + hh_questions
                 context = context + hh_context
@@ -320,7 +307,6 @@ def read_data_dpo(data="oasst", split="train", lang="fi", shuffle_data=True, max
                 print("Size of hh harmless training data", len(questions))
             else:
                 hh_questions, hh_context, hh_answers_best, hh_answers_worst = read_hh(os.path.join(parent_path, "hh_rlhf-train.jsonl"),
-                                                                                      single_turn_only=True,
                                                                                       max_examples=max_examples)
                 questions = questions + hh_questions
                 context = context + hh_context
@@ -366,7 +352,6 @@ def read_data_dpo(data="oasst", split="train", lang="fi", shuffle_data=True, max
             parent_path = "/scratch/project_462000319/finetuning_data/hh_rlhf"
             if "helpful" in data:
                 hh_questions, hh_context, hh_answers_best, hh_answers_worst = read_hh(os.path.join(parent_path, "helpful-base-test.jsonl"),
-                                                                                  single_turn_only=True,
                                                                                   max_examples=max_examples)
                 questions = questions + hh_questions
                 context = context + hh_context
@@ -374,7 +359,6 @@ def read_data_dpo(data="oasst", split="train", lang="fi", shuffle_data=True, max
                 answers_worst = answers_worst + hh_answers_worst
             if "harmless" in data:
                 hh_questions, hh_context, hh_answers_best, hh_answers_worst = read_hh(os.path.join(parent_path, "harmless-base-test.jsonl"),
-                                                                                  single_turn_only=True,
                                                                                   max_examples=max_examples)
                 questions = questions + hh_questions
                 context = context + hh_context
@@ -382,7 +366,6 @@ def read_data_dpo(data="oasst", split="train", lang="fi", shuffle_data=True, max
                 answers_worst = answers_worst + hh_answers_worst
             else:
                 hh_questions, hh_context, hh_answers_best, hh_answers_worst = read_hh(os.path.join(parent_path, "hh_rlhf-valid.jsonl"),
-                                                                                      single_turn_only=True,
                                                                                       max_examples=max_examples)
                 questions = questions + hh_questions
                 context = context + hh_context
@@ -427,7 +410,6 @@ def read_data_dpo(data="oasst", split="train", lang="fi", shuffle_data=True, max
             parent_path = "/scratch/project_462000319/finetuning_data/hh_rlhf"
             if "helpful" in data:
                 hh_questions, hh_context, hh_answers_best, hh_answers_worst = read_hh(os.path.join(parent_path, "helpful-base-test.jsonl"),
-                                                                                  single_turn_only=True,
                                                                                   max_examples=max_examples)
                 questions = questions + hh_questions
                 context = context + hh_context
@@ -435,7 +417,6 @@ def read_data_dpo(data="oasst", split="train", lang="fi", shuffle_data=True, max
                 answers_worst = answers_worst + hh_answers_worst
             if "harmless" in data:
                 hh_questions, hh_context, hh_answers_best, hh_answers_worst = read_hh(os.path.join(parent_path, "harmless-base-test.jsonl"),
-                                                                                  single_turn_only=True,
                                                                                   max_examples=max_examples)
                 questions = questions + hh_questions
                 context = context + hh_context
@@ -443,7 +424,6 @@ def read_data_dpo(data="oasst", split="train", lang="fi", shuffle_data=True, max
                 answers_worst = answers_worst + hh_answers_worst
             else:
                 hh_questions, hh_context, hh_answers_best, hh_answers_worst = read_hh(os.path.join(parent_path, "hh_rlhf-test.jsonl"),
-                                                                                      single_turn_only=True,
                                                                                       max_examples=max_examples)
                 questions = questions + hh_questions
                 context = context + hh_context

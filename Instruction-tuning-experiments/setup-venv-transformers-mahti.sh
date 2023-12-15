@@ -14,13 +14,6 @@
 # This script creates the directories venv and apex. If either of
 # these exists, ask to delete.
 
-# Load modules
-# module load cray-python
-# module load LUMI/22.08 partition/G rocm/5.3.3
-
-#module use /pfs/lustrep2/projappl/project_462000125/samantao-public/mymodules
-#module load aws-ofi-rccl/rocm-5.2.3
-
 module use /appl/local/csc/modulefiles/
 module load pytorch/2.0
 
@@ -35,7 +28,8 @@ python -m pip install --upgrade pip setuptools wheel
 #python -m pip install --upgrade torch==1.13.1+rocm5.2 --extra-index-url https://download.pytorch.org/whl/rocm5.2
 python -m pip install --upgrade numpy datasets evaluate accelerate scikit-learn nltk
 python -m pip install --upgrade transformers
-python -m pip install --upgrade deepspeed==0.10.3
+python -m pip install --upgrade trl
+python -m pip install --upgrade deepspeed
 python -m pip install --upgrade tensorboard
 python -m pip install --upgrade peft
 python -m pip install --upgrade seqeval

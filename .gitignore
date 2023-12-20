@@ -1,1 +1,3 @@
 Instruction-tuning-experiments/.venv/
+Instruction-tuning-experiments/logs/
+Instruction-tuning-experiments/__pycache__/

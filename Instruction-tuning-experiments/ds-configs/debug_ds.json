@@ -7,5 +7,6 @@
     "bf16": {
       "enabled": "auto"
     },
-  "steps_per_print": 20
+  "steps_per_print": 20,
+  "dump_state": true
 }

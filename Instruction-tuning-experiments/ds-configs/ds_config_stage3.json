@@ -1,5 +1,4 @@
 {
-
     "amp": {
         "enabled": "auto",
         "opt_level": "auto"
@@ -30,11 +29,11 @@
     "zero_optimization": {
         "stage": 3,
         "offload_optimizer": {
-            "device": "none",
+            "device": "cpu",
             "pin_memory": true
         },
         "offload_param": {
-            "device": "none",
+            "device": "cpu",
             "pin_memory": true
         },
         "overlap_comm": true,
@@ -54,5 +53,4 @@
     "train_batch_size": "auto",
     "train_micro_batch_size_per_gpu": "auto",
     "wall_clock_breakdown": false
-
 }
